@@ -1,0 +1,40 @@
+# ── Entornos virtuales ──
+venv/
+.venv/
+env/
+
+# ── Git ──
+.git/
+.gitignore
+.github/
+
+# ── Datos y logs (volúmenes en compose) ──
+data/
+logs/
+
+# ── Cachés de Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Docker ──
+.dockerignore
+Dockerfile
+docker-compose*.yml
+
+# ── Otros ──
+*.md
+plan/

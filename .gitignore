@@ -1,0 +1,15 @@
+venv/
+logs/
+data/
+config/secrets.env
+config/secrets.env.backup
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+repomix-output.xml
+bot/dashboard/bot_state.json
+docker-compose.override.yml
+*.code-workspace

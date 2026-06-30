@@ -1,0 +1,14 @@
+{
+  "include": ["bot", "tests", "config", "scripts"],
+  "exclude": ["**/__pycache__", ".mypy_cache", ".pytest_cache", ".hypothesis", "venv"],
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportPrivateUsage": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportMissingParameterType": "none",
+  "reportMissingTypeStubs": "none",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}
