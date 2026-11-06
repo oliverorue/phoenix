@@ -680,4 +680,19 @@ Si no se respeta ese orden, cualquier resultado —paper, backtest u optimizaci�
 - [ ] `mypy` en verde.
 - [ ] `pip install -e .` verificado en entorno limpio.
 
-**Siguiente:** Fase 1 — normalización de intervalos, `get_instrument_info()` y datos correctos.
+### Fase 1 — Completada (2026-11-06)
+
+- [x] Normalización centralizada de intervalos (`bot/core/timeframes.py`).
+- [x] `get_instrument_info()` busca el símbolo solicitado (no `symbols[0]`).
+- [x] Lee filtro `NOTIONAL` y `MIN_NOTIONAL` legacy.
+- [x] Devuelve `min_notional`, `max_notional` y precisión correctos.
+- [x] `_format_quantity()` usa el `stepSize`/precisión del símbolo solicitado.
+- [x] Llamadas REST de `python-binance` envueltas con `asyncio.to_thread`.
+- [x] WebSocket corregido: URL combinada `/stream?streams=`, intervalos `1h`, `connected` solo tras el primer mensaje.
+- [x] WebSocket deshabilitado por defecto hasta integrar sus buffers en `SymbolRunner`.
+- [x] Spread desconocido devuelve 100% (bloquea entradas), no 0%.
+- [x] Tracing deshabilitado por defecto a nivel global.
+- [x] Tests nuevos de timeframes, instrumento, intervalos, thread-offload y URL WS.
+- [x] Smoke test Testnet: 30 velas 15m/1h, XRP `stepSize=0.1`, `minNotional=5`, spread real.
+
+**Siguiente:** Fase 2 — `RiskManager` con balance live, drawdown, stops y cooldown.

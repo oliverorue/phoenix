@@ -129,7 +129,7 @@ class TestWebSocketFeedHandleKline:
 
     def test_handle_kline_1h_updates_buffer(self, ws_feed):
         with patch("bot.core.ws_feed.TIMEFRAME_PRIMARY", "60"):
-            msg = self._make_kline_msg(interval="60m")
+            msg = self._make_kline_msg(interval="1h")
             ws_feed._handle_kline(msg)
         assert not ws_feed._df_1h.empty
         assert ws_feed._last_update_1h > 0
@@ -146,7 +146,7 @@ class TestWebSocketFeedHandleKline:
         cb = MagicMock()
         ws_feed.on_kline_1h = cb
         with patch("bot.core.ws_feed.TIMEFRAME_PRIMARY", "60"):
-            msg = self._make_kline_msg(interval="60m")
+            msg = self._make_kline_msg(interval="1h")
             ws_feed._handle_kline(msg)
         cb.assert_called_once()
 
@@ -339,7 +339,7 @@ class TestWebSocketFeedSpread:
     def test_get_spread_percent_no_rest(self, ws_feed):
         ws_feed._rest = None
         spread = ws_feed.get_spread_percent()
-        assert spread == 0.0
+        assert spread == 100.0
 
     def test_get_spread_percent_no_fallback_after_fase5(self, ws_feed):
         """
@@ -349,7 +349,7 @@ class TestWebSocketFeedSpread:
         ws_feed._rest = None
         ws_feed._ob_ready = False
         spread = ws_feed.get_spread_percent()
-        assert spread == 0.0
+        assert spread == 100.0
 
 
 # ── Orderbook Init ────────────────────────────────────────
@@ -542,13 +542,13 @@ class TestWebSocketFeedOrderbookAPI:
         ws_feed._rest = mock_rest
         ws_feed._ob_ready = False
         spread = ws_feed.get_spread_percent()
-        assert spread == 0.0
+        assert spread == 100.0
 
     def test_get_spread_percent_zero_when_nothing_available(self, ws_feed):
         ws_feed._ob_ready = False
         ws_feed._rest = None
         spread = ws_feed.get_spread_percent()
-        assert spread == 0.0
+        assert spread == 100.0
 
 
 # ── Health with Orderbook ─────────────────────────────────

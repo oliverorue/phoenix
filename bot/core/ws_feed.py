@@ -31,6 +31,7 @@ from config.loader import (
 )
 from bot.core.data_feed import DataFeed
 from bot.core.exchange_client import BinanceFuturesClient
+from bot.core.timeframes import interval_minutes, normalize_interval
 
 
 class WebSocketFeed:
@@ -121,16 +122,18 @@ class WebSocketFeed:
             return
 
         sym_lower = self.symbol.lower()
+        entry_interval = normalize_interval(TIMEFRAME_ENTRY)
+        primary_interval = normalize_interval(TIMEFRAME_PRIMARY)
         streams = [
-            f"{sym_lower}@kline_{TIMEFRAME_ENTRY}m",
-            f"{sym_lower}@kline_{TIMEFRAME_PRIMARY}m",
+            f"{sym_lower}@kline_{entry_interval}",
+            f"{sym_lower}@kline_{primary_interval}",
         ]
         if self._ob_enabled:
             streams.append(f"{sym_lower}@depth{self._ob_depth}@100ms")
 
+        self.connected = False
         await self._client.subscribe_ws(streams, self._on_ws_message)
-        self.connected = True
-        logger.info(f"✅ WebSocket conectado para {self.symbol}")
+        logger.info(f"🔌 WebSocket suscripto para {self.symbol} (esperando datos)")
 
     def stop(self) -> None:
         """Desconecta el WebSocket."""
@@ -158,6 +161,8 @@ class WebSocketFeed:
     async def _on_ws_message(self, message: dict[str, Any]) -> None:
         """Router de mensajes WebSocket de Binance."""
         event_type = message.get("e", "")
+        if event_type in ("kline", "depthUpdate"):
+            self.connected = True
 
         if event_type == "kline":
             self._handle_kline(message)
@@ -180,10 +185,13 @@ class WebSocketFeed:
             "confirm": kline.get("x", False),
         }
 
-        if interval == f"{TIMEFRAME_ENTRY}m":
+        entry_interval = normalize_interval(TIMEFRAME_ENTRY)
+        primary_interval = normalize_interval(TIMEFRAME_PRIMARY)
+
+        if interval == entry_interval:
             with self._lock:
                 self._df_15m = self._append_kline(
-                    self._df_15m, data, int(TIMEFRAME_ENTRY),
+                    self._df_15m, data, interval_minutes(TIMEFRAME_ENTRY),
                 )
                 self._last_update_15m = time.time()
             if self.on_kline_15m:
@@ -191,10 +199,10 @@ class WebSocketFeed:
                     self.on_kline_15m(data)
                 except Exception:
                     pass
-        elif interval == f"{TIMEFRAME_PRIMARY}m":
+        elif interval == primary_interval:
             with self._lock:
                 self._df_1h = self._append_kline(
-                    self._df_1h, data, int(TIMEFRAME_PRIMARY),
+                    self._df_1h, data, interval_minutes(TIMEFRAME_PRIMARY),
                 )
                 self._last_update_1h = time.time()
             if self.on_kline_1h:
@@ -354,13 +362,13 @@ class WebSocketFeed:
         Obtiene spread bid-ask en porcentaje.
         Prioridad:
           1. Orderbook WebSocket en vivo (si está listo)
-          2. 0.0 si no hay fuente disponible
+          2. Valor conservador que bloquea la entrada si no hay datos.
         """
         best = self.get_orderbook_best()
         if best is not None:
-            return best["spread_pct"]
+            return float(best["spread_pct"])
 
-        return 0.0
+        return 100.0
 
     @property
     def is_ws_connected(self) -> bool:

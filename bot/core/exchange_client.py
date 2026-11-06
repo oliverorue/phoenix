@@ -14,7 +14,7 @@ Usage
 import asyncio
 import json
 import math
-from typing import Any, Optional, Callable, Protocol
+from typing import Any, Optional, Callable, Protocol, cast
 
 import websockets as ws
 from loguru import logger
@@ -25,6 +25,7 @@ from binance.exceptions import (
 )
 
 from bot.core.exceptions import ExecutionException, APIException
+from bot.core.timeframes import normalize_interval
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -152,8 +153,8 @@ class MarketDataException(APIException):
 #  Constants
 # ═══════════════════════════════════════════════════════════════════════
 
-_WS_BASE_MAIN = "wss://fstream.binance.com/ws/"
-_WS_BASE_TESTNET = "wss://stream.binancefuture.com/ws/"
+_WS_BASE_MAIN = "wss://fstream.binance.com"
+_WS_BASE_TESTNET = "wss://stream.binancefuture.com"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -254,7 +255,8 @@ class BinanceFuturesClient:
         Se usa ``math.floor`` (truncado) en lugar de ``round`` por
         seguridad.
         """
-        info = self._instrument_cache.get(symbol, {})
+        sym = self._normalize_symbol(symbol)
+        info = self._instrument_cache.get(sym, {})
         step_size = float(info.get("step_size", 0.001))
         precision = info.get("quantity_precision", 3)
         truncated = math.floor(qty / step_size) * step_size
@@ -305,7 +307,8 @@ class BinanceFuturesClient:
         qty_str = self._format_quantity(sym, qty)
 
         try:
-            return self._rest.futures_create_order(
+            return await asyncio.to_thread(
+                self._rest.futures_create_order,
                 symbol=sym,
                 side=side,
                 type="MARKET",
@@ -356,7 +359,8 @@ class BinanceFuturesClient:
         qty_str = self._format_quantity(sym, qty)
 
         try:
-            return self._rest.futures_create_order(
+            return await asyncio.to_thread(
+                self._rest.futures_create_order,
                 symbol=sym,
                 side=side,
                 type="LIMIT",
@@ -410,7 +414,8 @@ class BinanceFuturesClient:
         qty_str = self._format_quantity(sym, qty)
 
         try:
-            return self._rest.futures_create_order(
+            return await asyncio.to_thread(
+                self._rest.futures_create_order,
                 symbol=sym,
                 side=side,
                 type="STOP_MARKET",
@@ -445,7 +450,8 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            return self._rest.futures_cancel_order(
+            return await asyncio.to_thread(
+                self._rest.futures_cancel_order,
                 symbol=sym, orderId=order_id,
             )
         except BinanceAPIException as exc:
@@ -467,7 +473,9 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            self._rest.futures_cancel_all_open_orders(symbol=sym)
+            await asyncio.to_thread(
+                self._rest.futures_cancel_all_open_orders, symbol=sym,
+            )
             logger.debug("All open orders cancelled for {}", sym)
         except BinanceAPIException as exc:
             raise self._resolve_error(
@@ -492,7 +500,9 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            orders = self._rest.futures_get_open_orders(symbol=sym)
+            orders = await asyncio.to_thread(
+                self._rest.futures_get_open_orders, symbol=sym,
+            )
             return [
                 o for o in orders
                 if o.get("status") in ("NEW", "PARTIALLY_FILLED")
@@ -518,7 +528,9 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            positions = self._rest.futures_position_information(symbol=sym)
+            positions = await asyncio.to_thread(
+                self._rest.futures_position_information, symbol=sym,
+            )
             result: list[dict[str, Any]] = []
             for pos in positions:
                 size = float(pos.get("positionAmt", "0"))
@@ -553,7 +565,8 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            self._rest.futures_change_leverage(
+            await asyncio.to_thread(
+                self._rest.futures_change_leverage,
                 symbol=sym, leverage=leverage,
             )
             logger.debug("Leverage set to {}x for {}", leverage, sym)
@@ -576,7 +589,8 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            self._rest.futures_change_margin_type(
+            await asyncio.to_thread(
+                self._rest.futures_change_margin_type,
                 symbol=sym,
                 marginType=margin_type,
             )
@@ -632,7 +646,8 @@ class BinanceFuturesClient:
             if qty is not None:
                 await self._ensure_instrument_cache(sym)
                 qty_str = self._format_quantity(sym, qty)
-                result = self._rest.futures_create_order(
+                result = await asyncio.to_thread(
+                    self._rest.futures_create_order,
                     symbol=sym,
                     side=opposite_side,
                     type="STOP_MARKET",
@@ -641,7 +656,8 @@ class BinanceFuturesClient:
                     reduceOnly="true",
                 )
             else:
-                result = self._rest.futures_create_order(
+                result = await asyncio.to_thread(
+                    self._rest.futures_create_order,
                     symbol=sym,
                     side=opposite_side,
                     type="STOP_MARKET",
@@ -652,7 +668,7 @@ class BinanceFuturesClient:
             logger.info(
                 "SL set for {} at {} (side={})", sym, stop_price, opposite_side,
             )
-            return result
+            return cast(dict[str, Any], result)
         except BinanceAPIException as exc:
             raise self._resolve_error(
                 exc, f"set_stop_loss({sym}, {side}, stop={stop_price})",
@@ -696,7 +712,8 @@ class BinanceFuturesClient:
                     and order.get("side") == opposite_side
                 ):
                     try:
-                        self._rest.futures_cancel_order(
+                        await asyncio.to_thread(
+                            self._rest.futures_cancel_order,
                             symbol=sym,
                             orderId=order["orderId"],
                         )
@@ -775,10 +792,12 @@ class BinanceFuturesClient:
             ``taker_buy_volume``, ``taker_buy_quote_volume``.
         """
         sym = self._normalize_symbol(symbol)
+        binance_interval = normalize_interval(interval)
         try:
-            raw = self._rest.futures_klines(
+            raw = await asyncio.to_thread(
+                self._rest.futures_klines,
                 symbol=sym,
-                interval=interval,
+                interval=binance_interval,
                 limit=limit,
             )
             return [
@@ -800,7 +819,7 @@ class BinanceFuturesClient:
             ]
         except BinanceAPIException as exc:
             raise MarketDataException(
-                f"get_klines({sym}, {interval}, {limit}): "
+                f"get_klines({sym}, {binance_interval}, {limit}): "
                 f"[{exc.code}] {exc.message}",
             ) from exc
         except BinanceRequestException as exc:
@@ -821,7 +840,9 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            rates = self._rest.futures_funding_rate(symbol=sym, limit=1)
+            rates = await asyncio.to_thread(
+                self._rest.futures_funding_rate, symbol=sym, limit=1,
+            )
             if rates:
                 return {
                     "symbol": rates[0].get("symbol"),
@@ -851,7 +872,9 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            oi = self._rest.futures_open_interest(symbol=sym)
+            oi = await asyncio.to_thread(
+                self._rest.futures_open_interest, symbol=sym,
+            )
             return {
                 "symbol": oi.get("symbol"),
                 "open_interest": float(oi.get("openInterest", "0")),
@@ -870,16 +893,18 @@ class BinanceFuturesClient:
         """Obtiene la especificación completa del instrumento.
 
         Cachea el resultado para evitar llamadas repetidas a la API.
-        Extrae y estructura los filtros ``LOT_SIZE``, ``MIN_NOTIONAL``,
-        ``PRICE_FILTER``, y las precisiones.
+        Extrae y estructura los filtros ``LOT_SIZE``, ``NOTIONAL``
+        (o su variante legacy ``MIN_NOTIONAL``), ``PRICE_FILTER`` y las
+        precisiones del símbolo solicitado.
 
         Returns
         -------
         dict
             Contiene: ``symbol``, ``price_precision``,
             ``quantity_precision``, ``step_size``, ``min_qty``,
-            ``max_qty``, ``min_notional``, ``tick_size``,
-            ``min_price``, ``max_price``, ``filters``, ``raw``.
+            ``max_qty``, ``min_notional``, ``max_notional``,
+            ``tick_size``, ``min_price``, ``max_price``, ``filters``,
+            ``raw``.
         """
         sym = self._normalize_symbol(symbol)
 
@@ -887,17 +912,27 @@ class BinanceFuturesClient:
             return self._instrument_cache[sym]
 
         try:
-            # Algunas versiones de ccxt no aceptan symbol como kwarg; se filtra después
-            info = self._rest.futures_exchange_info()  # type: ignore[call-arg]
+            info = await asyncio.to_thread(
+                self._rest.futures_exchange_info,
+            )
             symbols = info.get("symbols", [])
-            if not symbols:
-                raise MarketDataException(f"Instrumento no encontrado: {sym}")
+            raw_sym = next(
+                (s for s in symbols if s.get("symbol") == sym),
+                None,
+            )
+            if raw_sym is None:
+                raise MarketDataException(
+                    f"Instrumento no encontrado en exchangeInfo: {sym}"
+                )
 
-            raw_sym = symbols[0]
             filters = {f["filterType"]: f for f in raw_sym.get("filters", [])}
 
             lot_size = filters.get("LOT_SIZE", {})
-            min_notional = filters.get("MIN_NOTIONAL", {})
+            notional_filter = (
+                filters.get("NOTIONAL")
+                or filters.get("MIN_NOTIONAL")
+                or {}
+            )
             price_filter = filters.get("PRICE_FILTER", {})
 
             step_size = float(lot_size.get("stepSize", "0.001"))
@@ -910,7 +945,15 @@ class BinanceFuturesClient:
                 "step_size": step_size,
                 "min_qty": float(lot_size.get("minQty", "0")),
                 "max_qty": float(lot_size.get("maxQty", "0")),
-                "min_notional": float(min_notional.get("notional", "0")),
+                "min_notional": float(
+                    notional_filter.get(
+                        "minNotional",
+                        notional_filter.get("notional", "0"),
+                    )
+                ),
+                "max_notional": float(
+                    notional_filter.get("maxNotional", "0")
+                ),
                 "tick_size": float(price_filter.get("tickSize", "0.00001")),
                 "min_price": float(price_filter.get("minPrice", "0")),
                 "max_price": float(price_filter.get("maxPrice", "0")),
@@ -939,7 +982,9 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         try:
-            ticker = self._rest.futures_symbol_ticker(symbol=sym)
+            ticker = await asyncio.to_thread(
+                self._rest.futures_symbol_ticker, symbol=sym,
+            )
             return float(ticker.get("price", "0"))
         except BinanceAPIException as exc:
             raise MarketDataException(
@@ -984,7 +1029,7 @@ class BinanceFuturesClient:
 
         base = _WS_BASE_TESTNET if self.testnet else _WS_BASE_MAIN
         stream_path = "/".join(streams)
-        url = f"{base}{stream_path}"
+        url = f"{base}/stream?streams={stream_path}"
 
         self._ws_running = True
 
@@ -1020,6 +1065,11 @@ class BinanceFuturesClient:
 
         self._ws_task = asyncio.create_task(_reader())
         logger.info("WS subscribed to streams: {}", streams)
+
+    @property
+    def is_ws_connected(self) -> bool:
+        """True si la conexión WebSocket está activa."""
+        return self._ws_conn is not None and self._ws_running
 
     async def unsubscribe_ws(self, streams: list[str]) -> None:
         """Desuscribe streams.
@@ -1071,7 +1121,7 @@ class BinanceFuturesClient:
             ``True`` si la API responde correctamente.
         """
         try:
-            self._rest.futures_ping()
+            await asyncio.to_thread(self._rest.futures_ping)
             return True
         except (BinanceAPIException, BinanceRequestException):
             return False

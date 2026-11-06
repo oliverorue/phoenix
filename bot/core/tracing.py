@@ -52,7 +52,8 @@ ATTR_WS_TOPIC = "trading.ws_topic"
 # ── Estado global (singleton) ────────────────────────────────
 _tracer: Optional[otel_trace.Tracer] = None
 _provider: Optional[SDKTracerProvider] = None
-_enabled: bool = True
+# Opt-in: solo se activa si TradingBot.init_tracing() lo habilita.
+_enabled: bool = False
 
 
 # ── Inicialización ────────────────────────────────────────────
@@ -263,7 +264,7 @@ class use_span:
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _infer_name(func: Callable, args: tuple) -> str:
+def _infer_name(func: Callable[..., Any], args: tuple[Any, ...]) -> str:
     """Infringe nombre de span desde la función y sus argumentos."""
     qual = getattr(func, "__qualname__", func.__name__)
     return qual
@@ -299,7 +300,7 @@ def current_trace_id() -> Optional[str]:
     return format(ctx.trace_id, "032x")
 
 
-def trace_id_filter(record: dict) -> None:
+def trace_id_filter(record: dict[str, Any]) -> None:
     """Filtro loguru que añade trace_id al dict del record.
 
     Uso::

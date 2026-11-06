@@ -17,6 +17,7 @@ from config.loader import (
 )
 from bot.core.exchange_client import BinanceFuturesClient, MarketDataException
 from bot.core.api_resilience import CircuitBreaker, api_retry_async
+from bot.core.timeframes import normalize_interval
 from bot.core.tracing import trace
 
 
@@ -131,10 +132,13 @@ class DataFeed:
     @api_retry_async(max_retries=3, base_delay=2.0)
     async def get_klines(self, interval: str, limit: int = 100) -> pd.DataFrame:
         """Obtiene velas OHLCV desde Binance (async)."""
+        binance_interval = normalize_interval(interval)
         try:
-            klines = await self._client.get_klines(self.symbol, interval, limit)
+            klines = await self._client.get_klines(
+                self.symbol, binance_interval, limit,
+            )
             if not klines:
-                logger.warning(f"Sin velas para {self.symbol} {interval}")
+                logger.warning(f"Sin velas para {self.symbol} {binance_interval}")
                 return pd.DataFrame()
 
             df = pd.DataFrame(klines)
@@ -153,7 +157,9 @@ class DataFeed:
             df.reset_index(drop=True, inplace=True)
             return df
         except MarketDataException as e:
-            raise DataFeedException(f"Error obteniendo velas {interval}: {e}") from e
+            raise DataFeedException(
+                f"Error obteniendo velas {binance_interval}: {e}"
+            ) from e
 
     async def current_1h(self) -> pd.DataFrame:
         """Obtiene las velas del timeframe principal (1h)."""
@@ -187,12 +193,13 @@ class DataFeed:
             return self._instrument_cache
         try:
             info = await self._client.get_instrument_info(self.symbol)
+            max_notional = float(info.get("max_notional", 0.0))
             self._instrument_cache = {
                 "qtyStep": info["step_size"],
                 "minOrderQty": info["min_qty"],
                 "maxOrderQty": info["max_qty"],
                 "minNotionalValue": info.get("min_notional", 1.0),
-                "maxNotionalValue": 1000000.0,
+                "maxNotionalValue": max_notional or 1_000_000.0,
             }
         except MarketDataException as e:
             fb = _INSTRUMENT_LOT_FALLBACK.get(self.symbol)
@@ -242,4 +249,5 @@ class DataFeed:
                     return spread
         except Exception as e:
             logger.debug(f"No se pudo obtener spread para {self.symbol}: {e}")
-        return 0.1  # valor por defecto no restrictivo
+        # Sin datos de orderbook no se debe habilitar una entrada.
+        return 100.0

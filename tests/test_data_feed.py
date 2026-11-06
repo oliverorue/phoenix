@@ -285,7 +285,7 @@ class TestDataFeedGetSpread:
             feed = DataFeed()
             feed._client._rest.futures_order_book.side_effect = Exception("API error")  # type: ignore[reportAttributeAccessIssue]
             spread = await feed.get_spread_percent()
-            assert spread == 0.1  # default
+            assert spread == 100.0  # sin datos: bloquea entradas
 
     @pytest.mark.asyncio
     async def test_get_spread_percent_zero_bid_returns_default(self):
@@ -297,7 +297,7 @@ class TestDataFeedGetSpread:
                 "asks": [],
             }
             spread = await feed.get_spread_percent()
-            assert spread == 0.1
+            assert spread == 100.0
 
 
 class TestDecimalPlaces:

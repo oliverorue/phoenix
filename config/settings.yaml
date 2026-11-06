@@ -296,7 +296,9 @@ timeframes:
   primary: '60'
 timezone: America/Asuncion
 websocket:
-  enabled: true
+  # Deshabilitado hasta integrar los buffers WS en SymbolRunner.
+  # El camino REST ya está normalizado y es el usado actualmente.
+  enabled: false
   kline_intervals:
   - 15
   - 60
