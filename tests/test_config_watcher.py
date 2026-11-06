@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+import config.loader  # noqa: F401  (asegura el atributo config.loader para patch)
 from bot.core.config_watcher import ConfigWatcher, _sync_module_vars
 
 

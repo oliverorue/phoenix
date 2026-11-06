@@ -42,7 +42,7 @@ class TestPositionManager:
         await position_mgr.update(current_price=1.05, df_15m=df, df_1h=df)
         assert mock_executor.tp1_hit == True
         mock_executor.activate_trailing_stop.assert_called_once()
-        mock_executor.update_stop_loss.assert_called_with(1.00)
+        mock_executor.update_stop_loss.assert_called_with(1.0008)  # breakeven + offset
 
     @pytest.mark.asyncio
     async def test_tp1_reached_long(self, position_mgr, mock_executor):
@@ -68,7 +68,7 @@ class TestPositionManager:
         df = pd.DataFrame()
         await position_mgr.update(current_price=1.02, df_15m=df, df_1h=df)
         assert mock_executor.tp1_hit is True
-        mock_executor.update_stop_loss.assert_called_with(1.00)
+        mock_executor.update_stop_loss.assert_called_with(1.0008)  # breakeven + offset
 
     @pytest.mark.asyncio
     async def test_breakeven_early_not_triggered(self, position_mgr, mock_executor):

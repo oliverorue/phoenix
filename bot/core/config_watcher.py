@@ -164,7 +164,14 @@ def _sync_module_vars(settings: dict[str, Any]) -> None:
 
         # Secciones que se pueden recargar en caliente
         cl._settings = settings
-        cl.EXCHANGE = settings.get("exchange", {})
+        new_exchange = settings.get("exchange", {})
+        # Seguridad: el modo testnet/mainnet NUNCA se cambia en caliente.
+        if bool(new_exchange.get("testnet", True)) != cl._SETTINGS_TESTNET:
+            logger.warning(
+                "⚠️ Cambio de exchange.testnet detectado en settings.yaml. "
+                "Se ignora en caliente: reiniciá el bot para aplicar el modo."
+            )
+        cl.EXCHANGE = new_exchange
         cl.SYMBOL = settings.get("symbol", "XRPUSDT")
         cl.FASES_ESCALAMIENTO = settings.get("phases", {})
         cl.SUPPORTED_COINS = settings.get("supported_coins", {})

@@ -12,6 +12,7 @@ Verifica:
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -451,6 +452,7 @@ class TestSymbolRunnerIntegration:
             "leverage": 1, "descripcion": "Fase 0",
         }))
         risk_mgr.is_trading_session = AsyncMock(return_value=True)
+        risk_mgr.is_loss_paused = AsyncMock(return_value=False)
         risk_mgr.reset_daily_if_needed = AsyncMock()
         risk_mgr.update_balance_for_drawdown = AsyncMock()
         risk_mgr.validate_drawdown = AsyncMock()
@@ -505,6 +507,7 @@ class TestSymbolRunnerIntegration:
         sig.tp2 = 0.52
         sig.score = 80
         sig.reason = "Test"
+        sig.timestamp = time.time()
         strategy.evaluate.return_value = sig
 
         risk_mgr = MagicMock()
@@ -517,6 +520,7 @@ class TestSymbolRunnerIntegration:
         risk_mgr.validate_rr = AsyncMock(return_value=True)
         risk_mgr.distribute_tp = AsyncMock(return_value=(50.0, 50.0))
         risk_mgr.is_trading_session = AsyncMock(return_value=True)
+        risk_mgr.is_loss_paused = AsyncMock(return_value=False)
         risk_mgr.reset_daily_if_needed = AsyncMock()
         risk_mgr.update_balance_for_drawdown = AsyncMock()
         risk_mgr.validate_drawdown = AsyncMock()

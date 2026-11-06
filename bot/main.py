@@ -34,6 +34,7 @@ from config.loader import (
     METRICS_ENABLED, METRICS_PORT, METRICS_JSON_PATH,
     TRACING_ENABLED, TRACING_EXPORTER, TRACING_OTLP_ENDPOINT, TRACING_SAMPLING_RATE,
     SHUTDOWN_TIMEOUT, SHUTDOWN_CLOSE_POSITIONS, SHUTDOWN_NOTIFY,
+    assert_runtime_safety,
 )
 from loguru import logger
 
@@ -131,8 +132,9 @@ class TradingBot:
     @trace(attributes={"component": "TradingBot"})
     async def _async_init(self, portfolio_config: Any = None) -> None:
         """Inicialización asíncrona del bot (balance, runners, estado)."""
-        # ── Determinar modo de ejecución ────────────────────────────
+        # ── Determinar modo de ejecución y validar seguridad ────────
         paper_mode = PAPER_TRADING_ENABLED
+        assert_runtime_safety(paper_mode=paper_mode)
         if paper_mode:
             logger.info(
                 f"📄 PAPER TRADING activado | Balance virtual: ${PAPER_INITIAL_BALANCE:.2f} | "
@@ -166,16 +168,30 @@ class TradingBot:
         # ── Obtener balance para distribuir ─────────────────────────
         if paper_mode:
             total_balance = PAPER_INITIAL_BALANCE
+            if total_balance <= 0:
+                raise RuntimeError(
+                    f"paper_trading.initial_balance inválido: ${total_balance:.2f}. "
+                    "Debe ser mayor que 0."
+                )
             logger.info(f"[PAPER] Balance virtual: ${total_balance:.2f}")
         else:
-            total_balance = 100.0  # fallback
+            # Sin balance real no se puede dimensionar riesgo: abortar.
             try:
                 temp_feed = DataFeed(symbol=portfolio[0]["symbol"], testnet=TESTNET)
                 total_balance = await temp_feed.get_balance()
-                if total_balance <= 0:
-                    total_balance = 100.0
+                # Fail-fast: verificar que el instrumento se pueda cargar.
+                await temp_feed.get_instrument_info()
             except Exception as e:
-                logger.warning(f"No se pudo obtener balance inicial: {e}. Usando {total_balance} USDT")
+                raise RuntimeError(
+                    f"No se pudo validar la cuenta/instrumento en modo real: {e}. "
+                    "El bot no arranca sin balance e instrumento verificados."
+                ) from e
+
+            if total_balance <= 0:
+                raise RuntimeError(
+                    f"Balance USDT inválido (${total_balance:.2f}). "
+                    "El bot no arranca en modo real sin fondos."
+                )
 
         # ── Crear runners para cada símbolo ────────────────────────
         self.runners = []

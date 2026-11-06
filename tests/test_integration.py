@@ -8,8 +8,13 @@ from datetime import datetime, timedelta
 from bot.core.backtester import BacktestEngine
 
 
+@pytest.mark.integration
 class TestBacktestIntegration:
-    """Prueba que el flujo completo (datos → indicadores → señal → trade) funciona."""
+    """Prueba que el flujo completo (datos → indicadores → señal → trade) funciona.
+
+    Requiere red y datos de Binance; se excluye del suite por defecto con
+    ``-m 'not integration'``.
+    """
 
     def test_backtest_generates_trades(self):
         """

@@ -120,7 +120,7 @@ def init_tracing(
 
 def get_tracer() -> otel_trace.Tracer:
     """Retorna el tracer global. Inicializa con defaults si no existe."""
-    global _tracer, _enabled
+    global _tracer
     if _tracer is None:
         _tracer = init_tracing()
     return _tracer
@@ -134,7 +134,6 @@ def set_enabled(enabled: bool) -> None:
 
 def shutdown_tracing() -> None:
     """Force-flush y shutdown del provider (útil en stop del bot)."""
-    global _provider
     if _provider is not None:
         try:
             _provider.force_flush()

@@ -14,8 +14,11 @@ dashboard:
 # ── Exchange ────────────────────────────────────────────
 exchange:
   name: binance
+  # Fuente principal del modo testnet/mainnet.
+  # Si TESTNET está definido en secrets.env, debe coincidir con este valor.
   testnet: true               # CAMBIA A false CUANDO QUIERAS MAINNET
-  # ⚠️ NUNCA CAMBIES A MAINNET SIN HACER PAPER TRADING PRIMERO
+  # ⚠️ NUNCA CAMBIES A MAINNET SIN HACER PAPER TRADING PRIMERO.
+  # Para mainnet real también se exige LIVE_TRADING_CONFIRMED=true.
 execution:
   loop_sleep_no_position: 120   # 2 min sin posición (ahorra rate limit)
   loop_sleep_position: 30       # 30s con posición abierta
@@ -253,8 +256,10 @@ metrics:
   json_path: data/metrics.json
 # ── Tracing ─────────────────────────────────────────────
 tracing:
-  enabled: true
-  exporter: console
+  # Deshabilitado por defecto para no inundar stdout con spans.
+  # Para habilitar: exporter: otlp + otlp_endpoint.
+  enabled: false
+  exporter: otlp
   otlp_endpoint: ""
   sampling_rate: 1.0
 rate_limiter:

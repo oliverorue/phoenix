@@ -85,6 +85,29 @@ TESTNET=true        # true para pruebas, false para real
 python -c "from config.loader import validate_config; msgs = validate_config(raise_on_error=False); print('\n'.join(msgs))"
 ```
 
+### 2b. Modo de ejecución y seguridad
+
+`exchange.testnet` en `config/settings.yaml` es la fuente principal:
+
+```yaml
+exchange:
+  testnet: true   # true = Testnet, false = Mainnet
+```
+
+Si también definís `TESTNET` en `secrets.env`, **debe coincidir** con
+`settings.yaml`; si no, el bot se niega a arrancar.
+
+Para operar en mainnet real (`paper_trading.enabled: false` +
+`exchange.testnet: false`) se exige una confirmación explícita:
+
+```bash
+LIVE_TRADING_CONFIRMED=true
+```
+
+Sin esa variable, sin API keys válidas o sin balance real, el bot no arranca.
+El dashboard **no** puede iniciar/detener el bot en Docker
+(`PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false`).
+
 ### 3. Iniciar
 
 ```bash

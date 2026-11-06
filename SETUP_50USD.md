@@ -136,8 +136,16 @@ En la app/web de Binance:
 ```bash
 BINANCE_API_KEY=TU_API_KEY_REAL
 BINANCE_API_SECRET=TU_API_SECRET_REAL
-TESTNET=false                    # ← CAMBIA A false
+# Si definís TESTNET, debe coincidir con exchange.testnet de settings.yaml.
+# TESTNET=false
 SYMBOL=XRPUSDT
+```
+
+Y en `config/settings.yaml`:
+
+```yaml
+exchange:
+  testnet: false   # ← Mainnet
 ```
 
 ### Paso 4: Iniciar en modo Paper (Mainnet) — 1ª Semana
@@ -157,6 +165,15 @@ Así validas que el bot lee bien los precios reales, sin arriesgar capital.
 paper_trading:
   enabled: false   # ← Ahora Sí, el bot opera con dinero real
 ```
+
+Además, para mainnet real el bot exige confirmación explícita:
+
+```bash
+# config/secrets.env
+LIVE_TRADING_CONFIRMED=true
+```
+
+Sin esta variable, sin API keys válidas o sin balance real, el bot **no arranca**.
 
 ---
 

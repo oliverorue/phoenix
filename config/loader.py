@@ -15,6 +15,26 @@ import yaml
 from loguru import logger
 from dotenv import load_dotenv
 
+
+def _parse_bool(value: Any) -> bool:
+    """Interpreta strings habituales de configuración como booleanos."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def resolve_testnet(settings_value: bool, env_value: str | None) -> tuple[bool, str]:
+    """Resuelve el modo testnet/mainnet.
+
+    ``exchange.testnet`` de settings.yaml es la fuente principal. La variable
+    de entorno ``TESTNET`` puede actuar como override explícito, pero si no
+    coincide con settings.yaml se considera un conflicto de configuración.
+    """
+    if env_value is None or not str(env_value).strip():
+        return bool(settings_value), "settings"
+    return _parse_bool(env_value), "env"
+
+
 # ── 1. Cargar variables de entorno ──────────────────────
 ENV_PATH = Path(__file__).parent / "secrets.env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -26,7 +46,6 @@ load_dotenv(dotenv_path=ENV_PATH)
 # (from config.loader import API_KEY) sigan funcionando.
 API_KEY: str | None = os.getenv("BINANCE_API_KEY")
 API_SECRET: str | None = os.getenv("BINANCE_API_SECRET")
-TESTNET: bool = os.getenv("TESTNET", "true").lower() == "true"
 TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 DISCORD_WEBHOOK: str = os.getenv("DISCORD_WEBHOOK", "")
@@ -38,6 +57,21 @@ with open(YAML_PATH, "r", encoding="utf-8") as f:
 
 # ── 3. Extraer secciones principales ────────────────────
 EXCHANGE: Dict[str, Any] = _settings.get("exchange", {})
+
+# ── 3a. Modo testnet/mainnet y confirmación de trading real ──
+_SETTINGS_TESTNET: bool = _parse_bool(EXCHANGE.get("testnet", True))
+TESTNET, TESTNET_SOURCE = resolve_testnet(
+    _SETTINGS_TESTNET, os.getenv("TESTNET")
+)
+# True solo si el operador confirmó explícitamente operar en mainnet.
+LIVE_TRADING_CONFIRMED: bool = _parse_bool(
+    os.getenv("LIVE_TRADING_CONFIRMED", "false")
+)
+# Hay conflicto si el env dice una cosa y settings.yaml dice otra.
+TESTNET_CONFLICT: bool = (
+    TESTNET_SOURCE == "env" and TESTNET != _SETTINGS_TESTNET
+)
+
 SYMBOL: str = _settings.get("symbol", "XRPUSDT")
 TIMEZONE_NAME: str = _settings.get("timezone", "America/Asuncion")
 FASES_ESCALAMIENTO: Dict[int, Dict[str, Any]] = _settings.get("phases", {})
@@ -94,8 +128,9 @@ METRICS_JSON_PATH: str = METRICS_CFG.get("json_path", "data/metrics.json")
 
 # ── 4ae. Tracing distribuido (OpenTelemetry) ──────────────────
 TRACING_CFG: Dict[str, Any] = _settings.get("tracing", {})
-TRACING_ENABLED: bool = TRACING_CFG.get("enabled", True)
-TRACING_EXPORTER: str = TRACING_CFG.get("exporter", "console")
+# Deshabilitado por defecto: el exporter console inunda logs en producción.
+TRACING_ENABLED: bool = TRACING_CFG.get("enabled", False)
+TRACING_EXPORTER: str = TRACING_CFG.get("exporter", "otlp")
 TRACING_OTLP_ENDPOINT: str = TRACING_CFG.get("otlp_endpoint", "")
 TRACING_SAMPLING_RATE: float = float(TRACING_CFG.get("sampling_rate", 1.0))
 
@@ -222,7 +257,85 @@ if __name__ == "__main__":
     print(f"   Balance $50 → Fase {fase}: {cfg['descripcion']}")
 
 
-# ── 6. Validación opcional (llamar explícitamente si se desea) ─────
+# ── 6. Seguridad de ejecución (paper/testnet/mainnet) ─────────────
+
+class RuntimeSafetyError(RuntimeError):
+    """La configuración no es segura para el modo de ejecución solicitado."""
+
+
+def _looks_like_placeholder(value: str | None) -> bool:
+    """True si el secreto está vacío o sigue siendo un placeholder."""
+    if value is None:
+        return True
+    normalized = value.strip().upper()
+    if not normalized:
+        return True
+    return normalized.startswith(("TU_", "YOUR_", "CHANGEME", "REPLACE_"))
+
+
+def validate_runtime_safety(
+    paper_mode: Optional[bool] = None,
+    testnet: Optional[bool] = None,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+) -> list[str]:
+    """Valida que la combinación de modo y credenciales sea segura.
+
+    Reglas de Fase 0:
+      - ``exchange.testnet`` y ``TESTNET`` deben coincidir (sin ambigüedad).
+      - En mainnet real (paper=False, testnet=False) se exige
+        ``LIVE_TRADING_CONFIRMED=true``.
+      - Cualquier modo con órdenes reales (paper=False) exige API keys reales.
+
+    Retorna una lista de errores. Lista vacía significa configuración válida.
+    """
+    paper = PAPER_TRADING_ENABLED if paper_mode is None else bool(paper_mode)
+    is_testnet = TESTNET if testnet is None else bool(testnet)
+
+    errors: list[str] = []
+
+    if TESTNET_CONFLICT:
+        errors.append(
+            "Conflicto de entorno: TESTNET="
+            f"{TESTNET} en variable de entorno, pero exchange.testnet="
+            f"{_SETTINGS_TESTNET} en settings.yaml. "
+            "Unificá ambos valores antes de arrancar."
+        )
+
+    if not paper:
+        if _looks_like_placeholder(api_key if api_key is not None else API_KEY):
+            errors.append("BINANCE_API_KEY no está configurada o es un placeholder.")
+        if _looks_like_placeholder(api_secret if api_secret is not None else API_SECRET):
+            errors.append("BINANCE_API_SECRET no está configurada o es un placeholder.")
+
+        if not is_testnet and not LIVE_TRADING_CONFIRMED:
+            errors.append(
+                "Mainnet real bloqueado: paper_trading.enabled=false y "
+                "exchange.testnet=false. Para habilitarlo, definí "
+                "LIVE_TRADING_CONFIRMED=true de forma explícita."
+            )
+
+    return errors
+
+
+def assert_runtime_safety(
+    paper_mode: Optional[bool] = None,
+    testnet: Optional[bool] = None,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+) -> None:
+    """Versión fail-fast de :func:`validate_runtime_safety`."""
+    errors = validate_runtime_safety(
+        paper_mode=paper_mode,
+        testnet=testnet,
+        api_key=api_key,
+        api_secret=api_secret,
+    )
+    if errors:
+        raise RuntimeSafetyError(" | ".join(errors))
+
+
+# ── 7. Validación opcional (llamar explícitamente si se desea) ─────
 
 def validate_config(raise_on_error: bool = True) -> list[str]:
     """

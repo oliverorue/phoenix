@@ -5,6 +5,7 @@ Todas las operaciones son NO BLOQUEANTES para no congelar Streamlit.
 """
 
 import asyncio
+import os
 import threading
 import logging
 from pathlib import Path
@@ -28,10 +29,35 @@ class BotController:
         self._stop_event = threading.Event()
         self._bot: Any = None
 
+    # ── Control habilitado ───────────────────────────────────
+
+    @staticmethod
+    def control_allowed() -> bool:
+        """True si el dashboard puede iniciar/detener el bot.
+
+        En Docker/producción se desactiva con
+        ``PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false`` para evitar un
+        segundo bot contra la misma cuenta API.
+        """
+        return os.getenv(
+            "PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+
+    def can_start(self) -> bool:
+        """True si el control está habilitado y no hay un bot corriendo."""
+        return self.control_allowed() and not self.is_running()
+
     # ── Start no bloqueante ──────────────────────────────────
 
     def start(self) -> bool:
         """Inicia el bot. NO bloquea — actualiza estado inmediatamente."""
+        if not self.control_allowed():
+            logger.warning(
+                "Control del bot deshabilitado desde el dashboard "
+                "(PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false)"
+            )
+            return False
+
         if self.is_running():
             logger.warning("El bot ya está corriendo")
             return False

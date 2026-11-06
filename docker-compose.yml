@@ -86,6 +86,8 @@ services:
       - ./config/secrets.env
     environment:
       - TZ=America/Asuncion
+      # El bot corre en su propio servicio: el dashboard solo monitorea.
+      - PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false
     depends_on:
       - bot
     networks:

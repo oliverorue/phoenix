@@ -33,18 +33,30 @@ dependencies = [
 [project.optional-dependencies]
 crypto = ["cryptography>=44.0.0"]
 hotreload = ["watchdog>=6.0.0"]
-all = ["phoenix[crypto,hotreload]"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "pytest-timeout>=2.3.0",
+    "hypothesis>=6.100.0",
+    "flake8>=7.0",
+    "mypy>=1.8.0",
+]
+all = ["phoenix[crypto,hotreload,dev]"]
 
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore::DeprecationWarning:websockets.*:",
     "ignore::DeprecationWarning:binance.*:",
 ]
-addopts = "--tb=short -q"
+addopts = "--tb=short -q -m 'not integration'"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+# Evita que un test colgado (p. ej. uno que toca red) bloquee el CI.
+timeout = 120
+timeout_method = "thread"
 markers = [
     "asyncio: mark test as async",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

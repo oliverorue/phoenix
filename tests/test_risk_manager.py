@@ -27,13 +27,13 @@ class TestPositionSize:
 
     @pytest.mark.asyncio
     async def test_basic_position_size(self, risk_mgr):
-        """Con SL a 1%, riesgo 2%, balance 200 => qty ~640."""
+        """Con SL a 1%, riesgo 2%, balance 200 => qty limitada por margen."""
         qty, _, msg = await risk_mgr.calculate_position_size(entry_price=0.50, sl=0.495)
         assert msg == "OK"
         assert qty > 0
         # qty teórica = (200 * 0.02) / 0.005 = 800, pero margen limita a (200*0.8)*1 / 0.50 = 320
         # Por step de 1.0, qty = 320
-        assert qty == pytest.approx(640, abs=1)
+        assert qty == pytest.approx(320, abs=1)
 
     @pytest.mark.asyncio
     async def test_zero_sl_rejected(self, risk_mgr):
@@ -127,7 +127,8 @@ class TestDrawdown:
     async def test_session_drawdown_more_strict_than_daily(self, risk_mgr):
         """El drawdown por sesión tiene un límite más estricto (80% del diario)."""
         from bot.core.exceptions import RiskException
-        # max_dd_daily = 6% → límite sesión = 4.8%
+        # Forzar el límite de fase 0 (6%) sin depender de la fase por balance.
+        risk_mgr._override_cfg = {"max_dd_daily": 0.06}
         # Simular DD diario de 5% (dentro del 6% diario) pero sesión de 5% (excede 4.8%)
         risk_mgr._peak_balance_daily = 200.0
         risk_mgr._peak_balance_session = 200.0

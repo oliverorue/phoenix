@@ -915,14 +915,23 @@ with st.sidebar:
     st.markdown("---")
     
     # ── Controles ──
+    control_allowed = controller.control_allowed()
+    if not control_allowed:
+        st.caption(
+            "🔒 Control del bot deshabilitado desde el dashboard. "
+            "Usá el proceso/servicio del bot."
+        )
+
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("▶️ Iniciar", width="stretch"):
+        if st.button("▶️ Iniciar", width="stretch",
+                     disabled=not controller.can_start()):
             if controller.start():
                 st.toast("✅ Bot iniciado")
                 st.rerun()
     with col2:
-        if st.button("⏹️ Detener", width="stretch"):
+        if st.button("⏹️ Detener", width="stretch",
+                     disabled=not control_allowed):
             if controller.stop():
                 st.toast("✅ Bot detenido")
                 st.rerun()
