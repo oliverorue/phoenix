@@ -62,6 +62,13 @@ class ExchangeClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    async def place_take_profit_market_order(
+        self, symbol: str, side: str, stop_price: float,
+        qty: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        ...
+
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         ...
 
@@ -73,6 +80,20 @@ class ExchangeClient(Protocol):
         ...
 
     async def get_positions(self, symbol: str) -> list[dict[str, Any]]:
+        ...
+
+    async def get_all_positions(self) -> list[dict[str, Any]]:
+        ...
+
+    async def get_account_balance(self, asset: str = "USDT") -> dict[str, Any]:
+        ...
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict[str, Any]:
+        ...
+
+    async def get_fills(
+        self, symbol: str, order_id: Optional[str] = None, limit: int = 100,
+    ) -> list[dict[str, Any]]:
         ...
 
     # ── Configuración ───────────────────────────────────────────────
@@ -267,6 +288,22 @@ class BinanceFuturesClient:
         truncated = math.floor(qty / step_size) * step_size
         return f"{truncated:.{precision}f}"
 
+    def _format_price(self, symbol: str, price: float) -> str:
+        """Trunca *price* al *tickSize* del instrumento (sin redondear).
+
+        Binance rechaza órdenes cuyo precio no sea múltiplo del *tickSize*
+        definido en el filtro ``PRICE_FILTER``. Se usa ``math.floor``
+        (truncado) en lugar de ``round`` para no cruzar el nivel de precio.
+        """
+        sym = self._normalize_symbol(symbol)
+        info = self._instrument_cache.get(sym, {})
+        tick_size = float(info.get("tick_size", 0.00001))
+        precision = info.get("price_precision", 8)
+        if tick_size <= 0:
+            tick_size = 0.00001
+        truncated = math.floor(price / tick_size + 1e-9) * tick_size
+        return f"{truncated:.{precision}f}"
+
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
         """Normaliza a mayúsculas (REST)."""
@@ -379,7 +416,7 @@ class BinanceFuturesClient:
             "type": "LIMIT",
             "timeInForce": "GTC",
             "quantity": qty_str,
-            "price": f"{price:.8f}",
+            "price": self._format_price(sym, price),
             "reduceOnly": "true" if reduce_only else "false",
         }
         if client_order_id:
@@ -440,7 +477,7 @@ class BinanceFuturesClient:
                 side=side,
                 type="STOP_MARKET",
                 quantity=qty_str,
-                stopPrice=f"{stop_price:.8f}",
+                stopPrice=self._format_price(sym, stop_price),
                 reduceOnly="true" if reduce_only else "false",
             )
         except BinanceAPIException as exc:
@@ -536,6 +573,23 @@ class BinanceFuturesClient:
                 f"get_open_orders({sym}) request error: {exc}",
             ) from exc
 
+    @staticmethod
+    def _standardize_position(pos: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Convierte una posición cruda de Binance a un dict estandarizado.
+
+        Devuelve ``None`` si la posición está cerrada (``positionAmt == 0``).
+        """
+        size = float(pos.get("positionAmt", "0"))
+        if size == 0:
+            return None
+        return {
+            "symbol": pos.get("symbol"),
+            "size": abs(size),
+            "side": "LONG" if size > 0 else "SHORT",
+            "avgPrice": float(pos.get("entryPrice", "0")),
+            "unrealizedPnL": float(pos.get("unRealizedProfit", "0")),
+        }
+
     async def get_positions(self, symbol: str) -> list[dict[str, Any]]:
         """Retorna las posiciones abiertas para un símbolo.
 
@@ -551,19 +605,6 @@ class BinanceFuturesClient:
             positions = await asyncio.to_thread(
                 self._rest.futures_position_information, symbol=sym,
             )
-            result: list[dict[str, Any]] = []
-            for pos in positions:
-                size = float(pos.get("positionAmt", "0"))
-                if size == 0:
-                    continue
-                result.append({
-                    "symbol": pos.get("symbol"),
-                    "size": abs(size),
-                    "side": "LONG" if size > 0 else "SHORT",
-                    "avgPrice": float(pos.get("entryPrice", "0")),
-                    "unrealizedPnL": float(pos.get("unRealizedProfit", "0")),
-                })
-            return result
         except BinanceAPIException as exc:
             raise self._resolve_error(
                 exc, f"get_positions({sym})",
@@ -572,6 +613,143 @@ class BinanceFuturesClient:
             raise APIException(
                 f"get_positions({sym}) request error: {exc}",
             ) from exc
+        result: list[dict[str, Any]] = []
+        for pos in positions:
+            std = self._standardize_position(pos)
+            if std is not None:
+                result.append(std)
+        return result
+
+    async def get_all_positions(self) -> list[dict[str, Any]]:
+        """Retorna **todas** las posiciones abiertas (todos los símbolos).
+
+        Útil para el kill switch (aplanar todo) y para el resumen del
+        dashboard. Mismo formato estandarizado que :meth:`get_positions`.
+        """
+        try:
+            positions = await asyncio.to_thread(
+                self._rest.futures_position_information,
+            )
+        except BinanceAPIException as exc:
+            raise self._resolve_error(exc, "get_all_positions") from exc
+        except BinanceRequestException as exc:
+            raise APIException(
+                f"get_all_positions request error: {exc}",
+            ) from exc
+        result: list[dict[str, Any]] = []
+        for pos in positions:
+            std = self._standardize_position(pos)
+            if std is not None:
+                result.append(std)
+        return result
+
+    async def get_account_balance(self, asset: str = "USDT") -> dict[str, Any]:
+        """Retorna el balance de una moneda en la cuenta de futuros.
+
+        Returns
+        -------
+        dict
+            Con ``asset``, ``balance`` (wallet) y ``available`` (margen
+            disponible para abrir). Cero si el activo no aparece.
+        """
+        try:
+            balances = await asyncio.to_thread(
+                self._rest.futures_account_balance,
+            )
+        except BinanceAPIException as exc:
+            raise self._resolve_error(
+                exc, f"get_account_balance({asset})",
+            ) from exc
+        except BinanceRequestException as exc:
+            raise APIException(
+                f"get_account_balance({asset}) request error: {exc}",
+            ) from exc
+        for b in balances:
+            if b.get("asset") == asset:
+                return {
+                    "asset": asset,
+                    "balance": float(b.get("balance", "0") or 0),
+                    "available": float(b.get("availableBalance", "0") or 0),
+                }
+        return {"asset": asset, "balance": 0.0, "available": 0.0}
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict[str, Any]:
+        """Retorna el estado de una orden por su ``orderId``.
+
+        Returns
+        -------
+        dict
+            Estandarizado: ``order_id``, ``symbol``, ``status``, ``side``,
+            ``type``, ``qty``, ``executed_qty``, ``avg_price``,
+            ``cum_quote``, ``reduce_only``, ``price``, ``stop_price``.
+        """
+        sym = self._normalize_symbol(symbol)
+        try:
+            o = await asyncio.to_thread(
+                self._rest.futures_get_order, symbol=sym, orderId=order_id,
+            )
+        except BinanceAPIException as exc:
+            raise self._resolve_error(
+                exc, f"get_order_status({sym}, {order_id})",
+            ) from exc
+        except BinanceRequestException as exc:
+            raise APIException(
+                f"get_order_status({sym}) request error: {exc}",
+            ) from exc
+        return {
+            "order_id": o.get("orderId"),
+            "symbol": o.get("symbol"),
+            "status": o.get("status"),
+            "side": o.get("side"),
+            "type": o.get("type"),
+            "qty": float(o.get("origQty", "0") or 0),
+            "executed_qty": float(o.get("executedQty", "0") or 0),
+            "avg_price": float(o.get("avgPrice", "0") or 0),
+            "cum_quote": float(o.get("cumQuote", "0") or 0),
+            "reduce_only": o.get("reduceOnly", False),
+            "price": float(o.get("price", "0") or 0),
+            "stop_price": float(o.get("stopPrice", "0") or 0),
+        }
+
+    async def get_fills(
+        self, symbol: str, order_id: Optional[str] = None, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Retorna los fills (trades ejecutados) de un símbolo.
+
+        Si ``order_id`` se pasa, filtra solo los fills de esa orden. Sirve
+        para el journaling automático (precio real, comisión, PnL realizado).
+
+        Returns
+        -------
+        list[dict]
+            Con ``order_id``, ``price``, ``qty``, ``commission``,
+            ``realized_pnl``, ``side``, ``time``.
+        """
+        sym = self._normalize_symbol(symbol)
+        try:
+            trades = await asyncio.to_thread(
+                self._rest.futures_account_trades, symbol=sym, limit=limit,
+            )
+        except BinanceAPIException as exc:
+            raise self._resolve_error(exc, f"get_fills({sym})") from exc
+        except BinanceRequestException as exc:
+            raise APIException(
+                f"get_fills({sym}) request error: {exc}",
+            ) from exc
+        result: list[dict[str, Any]] = []
+        for t in trades:
+            if order_id is not None and str(t.get("orderId")) != str(order_id):
+                continue
+            result.append({
+                "order_id": t.get("orderId"),
+                "price": float(t.get("price", "0") or 0),
+                "qty": float(t.get("qty", "0") or 0),
+                "commission": float(t.get("commission", "0") or 0),
+                "realized_pnl": float(t.get("realizedPnl", "0") or 0),
+                "side": t.get("side"),
+                "time": t.get("time"),
+            })
+        return result
 
     # ─────────────────────────────────────────────────────────────────
     #  Configuración
@@ -662,16 +840,16 @@ class BinanceFuturesClient:
         """
         sym = self._normalize_symbol(symbol)
         opposite_side = "SELL" if side.upper() == "LONG" else "BUY"
+        await self._ensure_instrument_cache(sym)
 
         try:
             params: dict[str, Any] = {
                 "symbol": sym,
                 "side": opposite_side,
                 "type": "STOP_MARKET",
-                "stopPrice": f"{stop_price:.8f}",
+                "stopPrice": self._format_price(sym, stop_price),
             }
             if qty is not None:
-                await self._ensure_instrument_cache(sym)
                 params["quantity"] = self._format_quantity(sym, qty)
                 params["reduceOnly"] = "true"
             else:
@@ -694,6 +872,72 @@ class BinanceFuturesClient:
         except BinanceRequestException as exc:
             raise APIException(
                 f"set_stop_loss({sym}) request error: {exc}",
+            ) from exc
+
+    async def place_take_profit_market_order(
+        self, symbol: str, side: str, stop_price: float,
+        qty: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Establece un Take Profit usando ``TAKE_PROFIT_MARKET``.
+
+        Parameters
+        ----------
+        symbol : str
+            Par de trading.
+        side : str
+            Lado de la **posición actual** (``'LONG'`` o ``'SHORT'``).
+        stop_price : float
+            Precio que dispara la toma de ganancia.
+        qty : float | None
+            Cantidad a cerrar. Si es ``None``, usa ``closePosition="true"``
+            (cierra toda la posición).
+
+        Returns
+        -------
+        dict
+            Respuesta de Binance.
+
+        Note
+        ----
+        Igual que :meth:`set_stop_loss`, ``side`` es el lado de la posición,
+        no el de la orden (se convierte al opuesto). El cierre siempre es
+        ``reduceOnly``/``closePosition``: nunca abre posición inversa.
+        """
+        sym = self._normalize_symbol(symbol)
+        opposite_side = "SELL" if side.upper() == "LONG" else "BUY"
+        await self._ensure_instrument_cache(sym)
+
+        try:
+            params: dict[str, Any] = {
+                "symbol": sym,
+                "side": opposite_side,
+                "type": "TAKE_PROFIT_MARKET",
+                "stopPrice": self._format_price(sym, stop_price),
+            }
+            if qty is not None:
+                params["quantity"] = self._format_quantity(sym, qty)
+                params["reduceOnly"] = "true"
+            else:
+                params["closePosition"] = "true"
+            if client_order_id:
+                params["newClientOrderId"] = client_order_id
+
+            result = await asyncio.to_thread(
+                self._rest.futures_create_order, **params,
+            )
+            logger.info(
+                "TP set for {} at {} (side={})", sym, stop_price, opposite_side,
+            )
+            return cast(dict[str, Any], result)
+        except BinanceAPIException as exc:
+            raise self._resolve_error(
+                exc,
+                f"place_take_profit_market_order({sym}, {side}, tp={stop_price})",
+            ) from exc
+        except BinanceRequestException as exc:
+            raise APIException(
+                f"place_take_profit_market_order({sym}) request error: {exc}",
             ) from exc
 
     async def update_stop_loss(
