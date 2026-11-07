@@ -32,6 +32,8 @@ def make_bot():
     bot = TradingBot.__new__(TradingBot)
     bot.runners = [runner]
     bot.balance = 50.0
+    bot.journal = MagicMock()
+    bot.journal._open_trade = {}
     return bot, runner, ex
 
 
@@ -59,7 +61,12 @@ def test_restores_paper_balance_and_position():
             "losses": 1,
             "total_pnl": 7.25,
             "total_commission": 0.2,
-        }
+        },
+        "_open_trade": {
+            "trade_id": "LONG_1",
+            "symbol": "XRPUSDT",
+            "side": "LONG",
+        },
     }
     with patch(
         "bot.core.state_recovery.StateRecovery.load_all_symbols",
@@ -75,6 +82,7 @@ def test_restores_paper_balance_and_position():
     assert ex.total_trades == 3
     assert ex._entry_qty == 100.0
     assert bot.balance == 57.25
+    assert bot.journal._open_trade["trade_id"] == "LONG_1"
 
 
 def test_no_saved_state_keeps_defaults():

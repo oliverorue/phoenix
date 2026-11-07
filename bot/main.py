@@ -318,6 +318,13 @@ class TradingBot:
                 "timestamp": now_iso,
             })
 
+        # Persistir el trade abierto para no perder el cierre en el journal.
+        has_open = any(r.executor.position_open for r in self.runners)
+        if has_open and self.journal and self.journal._open_trade:
+            StateRecovery.save_symbol_state("_open_trade", self.journal._open_trade)
+        else:
+            StateRecovery.clear_symbol("_open_trade")
+
     def _restore_paper_state(self) -> None:
         """Restaura balance/posición/stats de paper tras un reinicio."""
         from bot.core.state_recovery import StateRecovery as _SR
@@ -360,6 +367,16 @@ class TradingBot:
                 )
         if self.runners:
             self.balance = sum(r.balance for r in self.runners)
+
+        # Restaurar el trade abierto del journal si hay una posición abierta.
+        open_trade = saved_all.get("_open_trade")
+        if (
+            open_trade
+            and self.journal
+            and any(r.executor.position_open for r in self.runners)
+        ):
+            self.journal._open_trade = dict(open_trade)
+            logger.info("📝 Journal: trade abierto restaurado tras reinicio")
 
     @trace(attributes={"component": "TradingBot"})
     async def _update_dashboard_state(self) -> None:
