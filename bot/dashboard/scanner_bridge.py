@@ -19,6 +19,9 @@ from typing import Optional
 
 from loguru import logger
 
+from bot.execution.manager import TradeManager
+from bot.execution.models import Direction, Trade
+from bot.execution.sizing import plan_trade
 from bot.scanner.config import ScannerConfig
 from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import ScannerStats, Signal
@@ -40,7 +43,9 @@ class ScannerBridge:
         self.risk = RiskEngine(base_risk_pct=base_risk_pct)
         self.risk.load_history(self.store.load_pnl())
         self.ranker = SignalRanker(self._config)
+        self.trades = TradeManager()
         self._scanner = MarketScanner(self._config, on_signal=self.store.save)
+        self._scanner.on_price = self.trades.on_price
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
@@ -86,3 +91,44 @@ class ScannerBridge:
             self._scanner.volume_map(),
         )
         return ranked[: limit if limit is not None else self._config.top_n]
+
+    def open_paper_trade(
+        self, signal: Signal, capital: float,
+        risk_pct: Optional[float] = None,
+    ) -> Optional[Trade]:
+        """Abre un trade dry-run para una señal, con tamaño Kelly y niveles 1R/2R."""
+        if signal.direction not in ("LONG", "SHORT"):
+            return None
+        sizing = self.risk.suggest(capital, signal, base_risk_pct=risk_pct)
+        if sizing.risk_usdt <= 0:
+            return None
+        direction = Direction(signal.direction)
+        plan = plan_trade(
+            symbol=signal.symbol,
+            direction=direction,
+            price=signal.price,
+            risk_usdt=sizing.risk_usdt,
+            sl_distance_pct=self._config.sl_distance_pct,
+            tp1_ratio=self._config.tp1_ratio,
+            trailing_dist_pct=self._config.trailing_dist_pct,
+        )
+        return self.trades.open_trade(
+            symbol=plan.symbol,
+            direction=plan.direction,
+            entry_price=plan.entry_price,
+            sl_price=plan.sl_price,
+            tp1_price=plan.tp1_price,
+            tp2_price=plan.tp2_price,
+            qty=plan.qty,
+            tp1_ratio=plan.tp1_ratio,
+            trailing_dist=plan.trailing_dist,
+        )
+
+    def paper_open_trades(self) -> list[Trade]:
+        return self.trades.open_trades()
+
+    def paper_closed_trades(self) -> list[Trade]:
+        return self.trades.closed_trades()
+
+    def paper_stats(self) -> dict:
+        return self.trades.stats()

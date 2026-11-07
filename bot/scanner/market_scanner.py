@@ -64,6 +64,7 @@ class MarketScanner:
         self._cfg = config or ScannerConfig.from_settings()
         self._engine = engine or AnomalyEngine(self._cfg)
         self.on_signal = on_signal
+        self.on_price: Optional[Callable[[str, float], None]] = None
 
         self._testnet = not self._cfg.use_mainnet
         self._client = BinanceFuturesClient("", "", testnet=self._testnet)
@@ -274,6 +275,8 @@ class MarketScanner:
                         price = float(t.get("c") or 0.0)
                         self._last_price[sym] = price
                         self._engine.on_price(sym, price)
+                        if self.on_price is not None:
+                            self.on_price(sym, price)
             elif stream.endswith("!forceOrder@arr"):
                 for o in data:
                     sym = o.get("s", "")
@@ -306,6 +309,8 @@ class MarketScanner:
                 self._engine.on_depth(sym, bids, asks)
                 if bids and asks:
                     self._engine.on_price(sym, (bids[0][0] + asks[0][0]) / 2.0)
+                    if self.on_price is not None:
+                        self.on_price(sym, (bids[0][0] + asks[0][0]) / 2.0)
         finally:
             self._stats["events_processed"] += 1
         await self._maybe_evaluate(sym)

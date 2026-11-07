@@ -60,6 +60,11 @@ class ScannerConfig(BaseModel):
     w_freshness: float = 0.10
     freshness_halflife_seconds: int = 300  # la señal se "enfría" en ~5 min
 
+    # ── Ejecución (dry-run / live) ──────────────────────
+    sl_distance_pct: float = 0.015  # distancia al SL (1R) como fracción del precio
+    tp1_ratio: float = 0.6          # porción cerrada en TP1 (50-65%)
+    trailing_dist_pct: float = 0.0  # 0 = sin trailing (salida en TP2)
+
     @classmethod
     def from_settings(cls, overrides: Optional[dict[str, Any]] = None) -> "ScannerConfig":
         """Construye la config desde `settings.yaml` (sección `scanner`)."""

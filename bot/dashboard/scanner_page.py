@@ -116,6 +116,37 @@ def _render_history(st_module: Any, bridge: ScannerBridge) -> None:
         st_module.rerun()
 
 
+def _render_paper(st_module: Any, bridge: ScannerBridge) -> None:
+    """Panel de trades paper (dry-run): abiertos, cerrados y métricas."""
+    s = bridge.paper_stats()
+    c1, c2, c3, c4 = st_module.columns(4)
+    c1.metric("Cerrados", s["total"])
+    c2.metric("Wins", s["wins"])
+    c3.metric("Losses", s["losses"])
+    c4.metric("PnL (paper)", f"${s['pnl']:+.2f}")
+
+    open_trades = bridge.paper_open_trades()
+    if open_trades:
+        st_module.markdown("**Abiertos**")
+        for t in open_trades:
+            st_module.markdown(
+                f"- `{t.id}` {t.symbol} {t.direction.value} · entry {t.entry_price} · "
+                f"SL {t.sl_price} · TP1 {t.tp1_price} · TP2 {t.tp2_price} · "
+                f"qty {t.qty:g} · {t.status.value}"
+            )
+    else:
+        st_module.caption("Sin trades abiertos.")
+
+    closed = bridge.paper_closed_trades()
+    if closed:
+        st_module.markdown("**Cerrados (recientes)**")
+        for t in reversed(closed[-10:]):
+            st_module.markdown(
+                f"- `{t.id}` {t.symbol} {t.direction.value} · {t.exit_reason} · "
+                f"PnL {t.realized_pnl:+.2f} USDT"
+            )
+
+
 def render_scanner_page(st_module: Any = st) -> None:
     """Renderiza el radar completo. Importar en ``app.py``."""
     st_module.markdown(_CSS, unsafe_allow_html=True)
@@ -197,6 +228,19 @@ def render_scanner_page(st_module: Any = st) -> None:
                            sizing.kelly_multiplier),
                 unsafe_allow_html=True,
             )
+            if st_module.button(
+                f"🛒 Operar {r.signal.symbol} {r.signal.direction} (paper)",
+                key=f"operar_{r.signal.symbol}_{i}",
+            ):
+                trade = bridge.open_paper_trade(r.signal, capital, base_risk_pct)
+                if trade is not None:
+                    st_module.toast(
+                        f"✅ Trade {trade.id} abierto: {trade.symbol} "
+                        f"{trade.direction.value} @ {trade.entry_price}"
+                    )
+                else:
+                    st_module.toast("No se pudo abrir el trade")
+                st_module.rerun()
 
     with st_module.expander("📋 Ruta para operar (manual)", expanded=True):
         for icon, step in _RUTA:
@@ -208,6 +252,9 @@ def render_scanner_page(st_module: Any = st) -> None:
 
     with st_module.expander("📒 Historial de señales", expanded=False):
         _render_history(st_module, bridge)
+
+    with st_module.expander("📊 Paper (dry-run)", expanded=False):
+        _render_paper(st_module, bridge)
 
     with st_module.expander("🔧 Qué se puede cambiar", expanded=False):
         st_module.markdown(
