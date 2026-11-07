@@ -48,6 +48,7 @@ scanner:
   w_liquidity: 0.15
   w_freshness: 0.1
   freshness_halflife_seconds: 300
+  dry_run: true
   sl_distance_pct: 0.015
   tp1_ratio: 0.6
   trailing_dist_pct: 0.0

@@ -61,6 +61,7 @@ class ScannerConfig(BaseModel):
     freshness_halflife_seconds: int = 300  # la señal se "enfría" en ~5 min
 
     # ── Ejecución (dry-run / live) ──────────────────────
+    dry_run: bool = True  # True → paper simulado; False → órdenes reales (live)
     sl_distance_pct: float = 0.015  # distancia al SL (1R) como fracción del precio
     tp1_ratio: float = 0.6          # porción cerrada en TP1 (50-65%)
     trailing_dist_pct: float = 0.0  # 0 = sin trailing (salida en TP2)

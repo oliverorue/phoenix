@@ -40,6 +40,7 @@ class ScannerBridge:
         base_risk_pct: float = 0.01,
     ) -> None:
         self._config = config or ScannerConfig.from_settings()
+        self._dry_run = self._config.dry_run
         self.store = SignalStore()
         self.risk = RiskEngine(base_risk_pct=base_risk_pct)
         self.risk.load_history(self.store.load_pnl())
@@ -75,6 +76,9 @@ class ScannerBridge:
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    def is_dry_run(self) -> bool:
+        return self._dry_run
 
     def snapshot(self) -> tuple[list[Signal], ScannerStats, list[str]]:
         """(señales recientes, stats, símbolos rastreados) thread-safe."""
