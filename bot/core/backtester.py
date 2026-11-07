@@ -855,7 +855,7 @@ class BacktestEngine:
                 daily_equity[day_key] = equity
 
                 # Sincronizar risk_manager con equity actual
-                self.risk_mgr._backtest_balance = equity
+                self.risk_mgr.update_backtest_balance(equity)
 
                 if trade.pnl_usdt > 0:
                     result.wins += 1

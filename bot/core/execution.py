@@ -1,7 +1,7 @@
 """
 Ejecución de órdenes en Binance USDⓈ-M Futures (Market, SL, TP).
 """
-from typing import Optional
+from typing import Any, Optional
 import asyncio
 import math
 from config.loader import API_KEY, API_SECRET, TESTNET
@@ -35,6 +35,14 @@ class OrderExecutor:
         self._qty_step: float = 0.001
         self._init_qty_step()
 
+        # Balance y resultado del último cierre (para contabilidad de riesgo).
+        self.balance_scope = "account"
+        self._pending_close_reason = "manual_close"
+        self.last_close_pnl: Optional[float] = None
+        self.last_close_reason: str = ""
+        self.last_close_direction: Optional[str] = None
+        self.unreported_close: bool = False
+
     def _init_qty_step(self) -> None:
         try:
             if hasattr(self.data, '_instrument_cache') and self.data._instrument_cache:
@@ -57,6 +65,25 @@ class OrderExecutor:
                 testnet=TESTNET,
             )
         return self.client
+
+    async def get_balance(self) -> float:
+        """Balance real de la cuenta (USDT)."""
+        return float(await self.data.get_balance())
+
+    def mark_close_reason(self, reason: str) -> None:
+        """Marca la razón del próximo cierre."""
+        self._pending_close_reason = reason
+
+    def consume_close_result(self) -> Optional[dict[str, Any]]:
+        """Devuelve y limpia el resultado del último cierre no reportado."""
+        if not self.unreported_close:
+            return None
+        self.unreported_close = False
+        return {
+            "pnl": self.last_close_pnl,
+            "reason": self.last_close_reason,
+            "direction": self.last_close_direction,
+        }
 
     @api_retry_async(max_retries=2, base_delay=0.5, critical=True)
     async def set_leverage(self, leverage: int) -> None:
@@ -296,10 +323,11 @@ class OrderExecutor:
 
     @trace(attributes={"component": "OrderExecutor"})
     @api_retry(max_retries=2, base_delay=0.5, critical=True)
-    def close_position(self) -> None:
+    def close_position(self, reason: str = "manual_close") -> None:
         """Cierra posición a mercado (SINCRONO — legacy compat)."""
         if not self.position_open:
             return
+        self._pending_close_reason = reason
         import asyncio as _asyncio
         try:
             loop = _asyncio.get_event_loop()
@@ -318,16 +346,32 @@ class OrderExecutor:
         side = "SELL" if self.position_type == "LONG" else "BUY"
         exit_price = self.last_price if self.last_price > 0 else self.entry_price
 
-        await self._cancel_limit_orders()
-        await client.place_market_order(sym, side, self.quantity)
+        direction = self.position_type
+        entry = self.entry_price
+        qty = self.quantity
+        reason = self._pending_close_reason
 
-        logger.info(f"Posición {self.position_type} cerrada a mercado ~{exit_price:.4f}")
+        await self._cancel_limit_orders()
+        await client.place_market_order(sym, side, qty)
+
+        logger.info(f"Posición {direction} cerrada a mercado ~{exit_price:.4f}")
         if self.journal:
             self.journal.close(
                 exit_price=exit_price,
-                close_reason="manual_close",
+                close_reason=reason,
                 sl_final=self.current_sl
             )
+
+        if direction == "LONG":
+            pnl = (exit_price - entry) * qty
+        else:
+            pnl = (entry - exit_price) * qty
+
+        self.last_close_pnl = pnl
+        self.last_close_reason = reason
+        self.last_close_direction = direction
+        self.unreported_close = True
+        self._pending_close_reason = "manual_close"
         self.position_open = False
         self.position_type = None
 

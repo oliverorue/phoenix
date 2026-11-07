@@ -557,3 +557,15 @@ class TestNoRunners:
         pr = PortfolioRisk(database=mock_database)
         result = pr.parametric_var()
         assert "error" in result or "samples" in result
+
+    def test_var_uses_signed_returns(self, mock_database: MagicMock,
+                                     mock_notifier: MagicMock) -> None:
+        """El VaR no debe usar abs(): +5% y -5% no tienen volatilidad cero."""
+        mock_database.get_trades.return_value = (
+            [{"pnl_pct": 5.0} for _ in range(10)]
+            + [{"pnl_pct": -5.0} for _ in range(10)]
+        )
+        pr = PortfolioRisk(database=mock_database, notifier=mock_notifier)
+        result = pr.parametric_var()
+        assert result["sigma_pct"] > 0
+        assert result["var_95"] > 0

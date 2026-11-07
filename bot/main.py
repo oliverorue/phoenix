@@ -462,6 +462,11 @@ class TradingBot:
             tasks = [runner.run_cycle() for runner in self.runners]
             await asyncio.gather(*tasks, return_exceptions=True)
 
+            # Mantener el balance agregado (live: allocated sum ≈ total;
+            # paper: suma de balances virtuales).
+            if self.runners:
+                self.balance = sum(r.balance for r in self.runners)
+
             # Reconciliación periódica de órdenes (cada N ciclos)
             await self.reconciler.reconcile_all(self.runners)
 

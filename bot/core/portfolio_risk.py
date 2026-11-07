@@ -149,9 +149,9 @@ class PortfolioRisk:
             return {"error": "No database disponible", "samples": 0}
 
         trades = self.database.get_trades(limit=self.var_lookback_days * 3)
-        # Filtrar trades con PnL distinto de cero
+        # Retornos con signo, expresados como fracción (no como porcentaje).
         returns = [
-            abs(t.get("pnl_pct", 0)) for t in trades
+            float(t.get("pnl_pct", 0)) / 100.0 for t in trades
             if t.get("pnl_pct", 0) != 0
         ]
 
@@ -164,9 +164,8 @@ class PortfolioRisk:
             }
 
         import statistics
-        sigma = statistics.stdev(returns) if len(returns) > 1 else 0.0
-        # sigma ya está en %, divider entre 100 para decimal
-        sigma_dec = sigma / 100.0
+        sigma_dec = statistics.stdev(returns) if len(returns) > 1 else 0.0
+        sigma_pct = sigma_dec * 100.0
 
         exposure = self.total_exposure
         if exposure <= 0:
@@ -179,7 +178,7 @@ class PortfolioRisk:
         var_99 = z_99 * sigma_dec * exposure
 
         result = {
-            "sigma_pct": round(sigma, 4),
+            "sigma_pct": round(sigma_pct, 4),
             "exposure": round(self.total_exposure, 2),
             "var_95": round(var_95, 2),
             "var_99": round(var_99, 2),

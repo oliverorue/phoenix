@@ -695,4 +695,24 @@ Si no se respeta ese orden, cualquier resultado —paper, backtest u optimizaci�
 - [x] Tests nuevos de timeframes, instrumento, intervalos, thread-offload y URL WS.
 - [x] Smoke test Testnet: 30 velas 15m/1h, XRP `stepSize=0.1`, `minNotional=5`, spread real.
 
-**Siguiente:** Fase 2 — `RiskManager` con balance live, drawdown, stops y cooldown.
+### Fase 2 — Completada (2026-11-07)
+
+- [x] Separación explícita entre balance live/paper y balance de backtest.
+- [x] `set_backtest_balance()` / `update_backtest_balance()` solo para backtest.
+- [x] `set_initial_balance()` y `update_live_balance()` para live/paper.
+- [x] `SymbolRunner` actualiza el balance desde `OrderExecutor`/`PaperExecutor` en cada ciclo.
+- [x] El balance agregado del `TradingBot` se recalcula desde los runners.
+- [x] `set_balance()` ya no borra el notificador.
+- [x] `capital_inicio_dia` se reinicia correctamente al cambiar de día.
+- [x] `stops_dia` cuenta solo cierres por SL; TP, manuales y reversiones no cuentan.
+- [x] Las pérdidas consecutivas se resetean con una ganancia.
+- [x] `register_trade_result()` reemplaza el `register_stop()` indiscriminado.
+- [x] Cooldown avanza por vela cerrada, no por tick de 5 s.
+- [x] `dias_excluir` se aplica en vivo.
+- [x] `validate_rr` valida TP1, no TP2.
+- [x] Leverage y `risk_per_trade` por símbolo se aplican al sizing.
+- [x] `PortfolioRisk.can_open()` recibe el nocional estimado de la nueva posición.
+- [x] VaR usa retornos con signo, no `abs()`.
+- [x] Tests nuevos de balance, drawdown, stops, sesión, RR, cooldown y VaR.
+
+**Siguiente:** Fase 3 — ejecución y gestión de posición (fills reales, TP1/TP2, SL, trailing, shutdown).

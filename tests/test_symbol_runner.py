@@ -59,6 +59,11 @@ class TestSymbolRunnerInit:
         risk_mgr.update_balance_for_drawdown = AsyncMock()
         risk_mgr.validate_drawdown = AsyncMock()
         risk_mgr.set_balance = MagicMock()
+        risk_mgr.set_initial_balance = MagicMock()
+        risk_mgr.set_symbol_overrides = MagicMock()
+        risk_mgr.update_live_balance = MagicMock()
+        risk_mgr.register_trade_result = AsyncMock()
+        risk_mgr.reset_daily_if_needed = AsyncMock(return_value=False)
         risk_mgr.set_notifier = MagicMock()
 
         return {
@@ -68,7 +73,8 @@ class TestSymbolRunnerInit:
             "executor": MagicMock(spec=[
                 "open_position", "close_position", "update_stop_loss",
                 "activate_trailing_stop", "set_leverage",
-                "last_price",
+                "get_balance", "consume_close_result", "mark_close_reason",
+                "balance_scope", "last_price",
             ]),
             "position_mgr": AsyncMock(spec=["update"]),
             "journal": MagicMock(spec=["update_runup_drawdown", "open", "close", "_open_trade", "database"]),
@@ -149,11 +155,19 @@ class TestSymbolRunnerRunCycle:
         risk_mgr.update_balance_for_drawdown = AsyncMock()
         risk_mgr.validate_drawdown = AsyncMock()
         risk_mgr.set_balance = MagicMock()
+        risk_mgr.set_initial_balance = MagicMock()
+        risk_mgr.set_symbol_overrides = MagicMock()
+        risk_mgr.update_live_balance = MagicMock()
+        risk_mgr.register_trade_result = AsyncMock()
+        risk_mgr.reset_daily_if_needed = AsyncMock(return_value=False)
         risk_mgr.set_notifier = MagicMock()
 
         executor = AsyncMock()
         executor.position_open = False
         executor.last_price = 0.0
+        executor.get_balance = AsyncMock(return_value=200.0)
+        executor.balance_scope = "allocated"
+        executor.consume_close_result = MagicMock(return_value=None)
 
         position_mgr = AsyncMock()
         position_mgr.update.return_value = None
@@ -222,6 +236,34 @@ class TestSymbolRunnerRunCycle:
         mocks["executor"].open_position.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_portfolio_check_uses_estimated_notional(self, runner, mocks):
+        """PortfolioRisk.can_open recibe el nocional de la nueva posición."""
+        import time
+        sig = MagicMock()
+        sig.has_signal = True
+        sig.direction = "LONG"
+        sig.entry = 0.50
+        sig.sl = 0.495
+        sig.tp1 = 0.51
+        sig.tp2 = 0.52
+        sig.score = 80
+        sig.reason = "Test"
+        sig.timestamp = time.time()
+        mocks["strategy"].evaluate.return_value = sig
+        mocks["risk_mgr"].calculate_position_size = AsyncMock(
+            return_value=(100.0, 2.0, "OK")
+        )
+
+        portfolio = MagicMock()
+        portfolio.can_open.return_value = True
+        runner.portfolio_risk = portfolio
+        mocks["executor"].open_position.return_value = True
+
+        await runner.run_cycle()
+
+        portfolio.can_open.assert_called_once_with(pytest.approx(50.0))
+
+    @pytest.mark.asyncio
     async def test_run_cycle_risk_exception(self, runner, mocks):
         """RiskException se captura sin crash."""
         mocks["risk_mgr"].reset_daily_if_needed.side_effect = RiskException("Balance insuficiente")
@@ -244,6 +286,70 @@ class TestSymbolRunnerRunCycle:
         mocks["risk_mgr"].get_phase_config = AsyncMock(return_value=(2, {"descripcion": "Fase 2"}))
         await runner.run_cycle()
         assert runner.fase_num == 2
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_updates_balance_from_executor(self, runner, mocks):
+        """El balance del runner sigue al executor (live/paper)."""
+        mocks["executor"].get_balance.return_value = 250.0
+        await runner.run_cycle()
+        assert runner.balance == pytest.approx(250.0)
+        mocks["risk_mgr"].update_live_balance.assert_called_with(
+            pytest.approx(250.0)
+        )
+
+    @pytest.mark.asyncio
+    async def test_cooldown_ticks_once_per_candle(self, runner, mocks):
+        """tick_cooldown se llama una vez por vela nueva, no por ciclo."""
+        df = mocks["data_feed"].current_15m.return_value
+        await runner.run_cycle()
+        await runner.run_cycle()
+        assert mocks["strategy"].tick_cooldown.call_count == 1
+
+        df2 = df.copy()
+        df2["timestamp"] = df2["timestamp"] + pd.Timedelta(minutes=15)
+        mocks["data_feed"].current_15m.return_value = df2
+        await runner.run_cycle()
+        assert mocks["strategy"].tick_cooldown.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_close_result_stop_updates_risk_and_strategy(
+        self, runner, mocks
+    ):
+        """Un cierre por stop cuenta como stop y como pérdida."""
+        mocks["executor"].consume_close_result.return_value = {
+            "pnl": -1.0,
+            "reason": "stop_loss",
+            "direction": "LONG",
+        }
+
+        await runner.run_cycle()
+
+        mocks["risk_mgr"].register_trade_result.assert_awaited_once_with(
+            was_loss=True, is_stop=True,
+        )
+        mocks["strategy"].register_trade_outcome.assert_called_once_with(
+            "LONG", True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_close_result_take_profit_is_not_stop(
+        self, runner, mocks
+    ):
+        """Un cierre por TP no cuenta como stop."""
+        mocks["executor"].consume_close_result.return_value = {
+            "pnl": 2.0,
+            "reason": "take_profit",
+            "direction": "LONG",
+        }
+
+        await runner.run_cycle()
+
+        mocks["risk_mgr"].register_trade_result.assert_awaited_once_with(
+            was_loss=False, is_stop=False,
+        )
+        mocks["strategy"].register_trade_outcome.assert_called_once_with(
+            "LONG", False,
+        )
 
 
 class TestSymbolRunnerWithPosition:
@@ -274,11 +380,19 @@ class TestSymbolRunnerWithPosition:
         risk_mgr.update_balance_for_drawdown = AsyncMock()
         risk_mgr.validate_drawdown = AsyncMock()
         risk_mgr.set_balance = MagicMock()
+        risk_mgr.set_initial_balance = MagicMock()
+        risk_mgr.set_symbol_overrides = MagicMock()
+        risk_mgr.update_live_balance = MagicMock()
+        risk_mgr.register_trade_result = AsyncMock()
+        risk_mgr.reset_daily_if_needed = AsyncMock(return_value=False)
         risk_mgr.set_notifier = MagicMock()
 
         executor = MagicMock()
         executor.position_open = True
         executor.position_type = "LONG"
+        executor.get_balance = AsyncMock(return_value=200.0)
+        executor.balance_scope = "allocated"
+        executor.consume_close_result = MagicMock(return_value=None)
         executor.entry_price = 0.50
         executor.current_sl = 0.495
         executor.quantity = 100.0

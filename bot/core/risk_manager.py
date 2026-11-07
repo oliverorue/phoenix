@@ -74,15 +74,24 @@ class RiskManager:
         self._peak_balance_session: Optional[float] = None
         self._kelly_sizing: Any = kelly_sizing
 
+        # Balance live/paper: se actualiza en cada ciclo desde el executor.
+        self._live_balance: Optional[float] = None
+        # ``_backtest_balance`` solo tiene efecto cuando este flag es True.
+        self._backtest_mode: bool = False
+        self._backtest_balance: Optional[float] = None
+
+        # Overrides por símbolo (portfolio) sobre la configuración de fase.
+        self._symbol_risk_per_trade: Optional[float] = None
+        self._symbol_leverage: Optional[int] = None
+
         # Cache de fase_config con TTL para evitar múltiples llamadas async
         # dentro del mismo ciclo de trading
         self._cached_fase_num: Optional[int] = None
         self._cached_fase_cfg: Optional[dict[str, Any]] = None
         self._cached_fase_ts: float = 0.0
 
-    def set_balance(self, balance: float) -> None:
-        """Permite fijar un balance manual (para backtesting)."""
-        self._backtest_balance = balance
+    def _reset_state(self) -> None:
+        """Resetea contadores de riesgo sin tocar el notificador."""
         self.capital_inicio_dia = None
         self.capital_inicio_semana = None
         self.capital_inicio_mes = None
@@ -92,9 +101,67 @@ class RiskManager:
         self._consecutive_losses = 0
         self._loss_pause_until = 0.0
         self.fecha_dia = None
-        self._notifier = None
         self._peak_balance_daily = None
         self._peak_balance_session = None
+        self._cached_fase_num = None
+        self._cached_fase_cfg = None
+
+    def set_backtest_balance(self, balance: float) -> None:
+        """Fija el balance de backtest y activa el modo backtest."""
+        self._backtest_mode = True
+        self._backtest_balance = float(balance)
+        self._live_balance = None
+        self._reset_state()
+
+    def set_balance(self, balance: float) -> None:
+        """Alias legacy de :meth:`set_backtest_balance`.
+
+        No usar en live/paper: congela el balance y desactiva el uso del
+        balance real. Para live/paper usar :meth:`set_initial_balance` y
+        :meth:`update_live_balance`.
+        """
+        self.set_backtest_balance(balance)
+
+    def set_initial_balance(self, balance: float) -> None:
+        """Inicializa el balance live/paper (no activa modo backtest)."""
+        self._backtest_mode = False
+        self._backtest_balance = None
+        self._live_balance = float(balance)
+        self._reset_state()
+        self.capital_inicio_dia = self._live_balance
+        self._peak_balance_daily = self._live_balance
+        self._peak_balance_session = self._live_balance
+
+    def update_live_balance(self, balance: float) -> None:
+        """Actualiza el balance real/paper del ciclo actual."""
+        self._backtest_mode = False
+        self._backtest_balance = None
+        self._live_balance = float(balance)
+        # El balance puede cambiar de fase: invalidar cache de fase.
+        self._cached_fase_num = None
+        self._cached_fase_cfg = None
+
+    def update_backtest_balance(self, balance: float) -> None:
+        """Actualiza el equity de backtest sin resetear contadores."""
+        self._backtest_mode = True
+        self._backtest_balance = float(balance)
+
+    def set_symbol_overrides(
+        self,
+        risk_per_trade: Optional[float] = None,
+        leverage: Optional[int] = None,
+    ) -> None:
+        """Aplica overrides por símbolo sobre la fase."""
+        self._symbol_risk_per_trade = risk_per_trade
+        self._symbol_leverage = leverage
+
+    async def _current_balance(self) -> float:
+        """Devuelve el balance de backtest o el live/paper actualizado."""
+        if self._backtest_mode and self._backtest_balance is not None:
+            return self._backtest_balance
+        if self._live_balance is not None:
+            return self._live_balance
+        return float(await self.data.get_balance())
 
     async def get_phase_config(self) -> tuple[int, dict[str, Any]]:
         """Obtiene (fase_num, config) para el balance actual (async).
@@ -112,10 +179,7 @@ class RiskManager:
                 and now - self._cached_fase_ts < _CACHE_TTL_S):
             return self._cached_fase_num, self._cached_fase_cfg
 
-        if hasattr(self, "_backtest_balance") and self._backtest_balance is not None:
-            balance = self._backtest_balance
-        else:
-            balance = await self.data.get_balance()
+        balance = await self._current_balance()
         fase_num, cfg = get_phase_config(balance)
         if self._override_cfg:
             cfg = {**cfg, **self._override_cfg}
@@ -137,11 +201,12 @@ class RiskManager:
         Retorna (qty, risk_usdt, mensaje).
         """
         _, fase_cfg = await self.get_phase_config()
-        if hasattr(self, "_backtest_balance") and self._backtest_balance is not None:
-            balance = self._backtest_balance
-        else:
-            balance = await self.data.get_balance()
-        risk_per_trade = fase_cfg.get("risk_per_trade", DEFAULT_RISK_PER_TRADE)
+        balance = await self._current_balance()
+        risk_per_trade = (
+            self._symbol_risk_per_trade
+            if self._symbol_risk_per_trade is not None
+            else fase_cfg.get("risk_per_trade", DEFAULT_RISK_PER_TRADE)
+        )
 
         # ── Kelly Criterion: ajuste dinámico del riesgo ──
         if self._kelly_sizing is not None:
@@ -185,7 +250,11 @@ class RiskManager:
             )
         risk_per_trade = risk_per_trade * dd_scale
 
-        leverage = fase_cfg.get("leverage", DEFAULT_LEVERAGE)
+        leverage = (
+            self._symbol_leverage
+            if self._symbol_leverage is not None
+            else fase_cfg.get("leverage", DEFAULT_LEVERAGE)
+        )
 
         risk_usdt = balance * risk_per_trade
         sl_distance = abs(entry_price - sl)
@@ -250,12 +319,12 @@ class RiskManager:
         sl_pct = abs(entry - sl) / entry
         return bool(sl_pct <= max_sl_pct)
 
-    async def validate_rr(self, entry: float, tp2: float, sl: float,
+    async def validate_rr(self, entry: float, tp: float, sl: float,
                           commission_pct: float = _DEFAULT_COMMISSION_PCT) -> bool:
         """
         Verifica que el Risk/Reward neto mínimo se cumpla (async).
         Fix #4: Descuenta comisiones de entrada+salida del RR bruto.
-        FIX v5.1: Usa tp1_rr como referencia (no tp2_rr) porque:
+        FIX v5.1: Valida contra TP1 (no TP2) porque:
           - TP1 es donde el 65% de la posición cierra
           - Después de TP1 el SL va a breakeven (con offset)
           - TP2 es bonus para el 35% restante
@@ -268,15 +337,15 @@ class RiskManager:
 
         Args:
             entry: Precio de entrada.
-            tp2: Precio de take profit 2.
+            tp: Precio de take profit 1 (TP1).
             sl: Precio de stop loss.
             commission_pct: Comisión total esperada (entrada + salida) como fracción.
                             Default 0.0011 = 0.11% (0.055% taker × 2).
         """
         _, fase_cfg = await self.get_phase_config()
-        min_rr = fase_cfg.get("tp1_rr", 1.5)  # Usar tp1_rr como referencia
+        min_rr = fase_cfg.get("tp1_rr", 1.5)
         sl_dist = abs(entry - sl)
-        tp_dist = abs(tp2 - entry)
+        tp_dist = abs(tp - entry)
 
         if sl_dist == 0:
             return False
@@ -296,7 +365,7 @@ class RiskManager:
         rr_neto = tp_net / sl_net
 
         logger.debug(
-            f"validate_rr | entry={entry:.6f} tp2={tp2:.6f} sl={sl:.6f} | "
+            f"validate_rr | entry={entry:.6f} tp1={tp:.6f} sl={sl:.6f} | "
             f"rr_bruto={tp_dist/sl_dist:.4f} rr_neto={rr_neto:.4f} "
             f"min_rr_config(tp1_rr)={min_rr} | comm={commission_pct:.4f}"
         )
@@ -318,9 +387,14 @@ class RiskManager:
     def set_notifier(self, notifier: Any) -> None:
         self._notifier = notifier
 
-    async def reset_daily_if_needed(self) -> None:
+    async def reset_daily_if_needed(self) -> bool:
         """Resetear contadores diarios semanales y mensuales según corresponda.
-        
+
+        Returns
+        -------
+        bool
+            ``True`` si cambió el día (el caller puede resetear cooldowns).
+
         Fix #1: Detecta cambios de semana y mes para reiniciar capitales de referencia.
         Fix #3: Resetea contador de pérdidas consecutivas al cambiar de día.
         Fix #6: Reconoce discrepancia de balance contra el exchange.
@@ -336,18 +410,17 @@ class RiskManager:
         iso_calendar = hoy.isocalendar()
         semana_nueva = iso_calendar[1]
         mes_nuevo = ahora.month
+        day_changed = False
 
         # Obtener balance actual para reconciliación
-        if hasattr(self, "_backtest_balance") and self._backtest_balance is not None:
-            balance_actual = self._backtest_balance
-        else:
-            try:
-                balance_actual = await self.data.get_balance()
-            except Exception:
-                balance_actual = None
+        try:
+            balance_actual = await self._current_balance()
+        except Exception:
+            balance_actual = None
 
         # ── Cambio de día ──
         if self.fecha_dia != hoy:
+            day_changed = self.fecha_dia is not None
             self.fecha_dia = hoy
             self.stops_dia = 0
             # Fix #3: Reset de pérdidas consecutivas al nuevo día
@@ -358,9 +431,11 @@ class RiskManager:
             self._cached_fase_num = None
             self._cached_fase_cfg = None
 
-            if self.capital_inicio_dia is None:
-                if balance_actual is not None:
-                    self.capital_inicio_dia = balance_actual
+            # El capital de referencia diario SÍ se reinicia cada día.
+            if balance_actual is not None:
+                self.capital_inicio_dia = balance_actual
+                self._peak_balance_daily = balance_actual
+                self._peak_balance_session = balance_actual
 
         # ── Fix #1: Cambio de semana ──
         if self._semana_actual is None or self._semana_actual != semana_nueva:
@@ -413,6 +488,8 @@ class RiskManager:
                     except Exception:
                         pass
 
+        return day_changed
+
     async def get_current_drawdown_pct(self) -> float:
         """
         Calcula el drawdown actual del día como porcentaje desde el peak.
@@ -420,10 +497,7 @@ class RiskManager:
         También rastrea drawdown por sesión de trading.
         """
         _, _fase_cfg = await self.get_phase_config()
-        if hasattr(self, "_backtest_balance") and self._backtest_balance is not None:
-            current_balance = self._backtest_balance
-        else:
-            current_balance = await self.data.get_balance()
+        current_balance = await self._current_balance()
 
         # Actualizar peak diario
         if not hasattr(self, '_peak_balance_daily') or self._peak_balance_daily is None:
@@ -449,13 +523,10 @@ class RiskManager:
         """
         if not hasattr(self, '_peak_balance_session') or self._peak_balance_session is None:
             return 0.0
-        if hasattr(self, "_backtest_balance") and self._backtest_balance is not None:
-            current_balance = self._backtest_balance
-        else:
-            try:
-                current_balance = await self.data.get_balance()
-            except Exception:
-                return 0.0
+        try:
+            current_balance = await self._current_balance()
+        except Exception:
+            return 0.0
         if self._peak_balance_session > 0:
             dd_pct = (self._peak_balance_session - current_balance) / self._peak_balance_session * 100
             return max(0, dd_pct)
@@ -510,10 +581,7 @@ class RiskManager:
         max_dd_weekly = fase_cfg.get("max_dd_weekly", 0.0) * 100
         max_dd_monthly = fase_cfg.get("max_dd_monthly", 0.0) * 100
 
-        if hasattr(self, "_backtest_balance") and self._backtest_balance is not None:
-            current_balance = self._backtest_balance
-        else:
-            current_balance = await self.data.get_balance()
+        current_balance = await self._current_balance()
 
         # 1. Validar drawdown diario
         current_dd = await self.get_current_drawdown_pct()
@@ -549,28 +617,35 @@ class RiskManager:
                     f"(límite: {max_dd_monthly:.2f}%)"
                 )
 
-    async def register_stop(self) -> None:
-        """
-        Registra un stop loss ejecutado.
+    async def register_trade_result(
+        self, was_loss: bool, is_stop: bool = False,
+    ) -> None:
+        """Registra el resultado de un trade cerrado.
 
-        Fix #3: Trackea pérdidas consecutivas. Si se alcanza el umbral,
-        activa una pausa forzada de 2 horas y notifica.
+        - ``is_stop=True`` cuenta para ``stops_dia``. Un TP, un cierre manual
+          o una reversión no cuentan como stop.
+        - Una ganancia resetea las pérdidas consecutivas.
+        - Una pérdida incrementa el circuit breaker.
         """
-        self.stops_dia += 1
-        # Fix #3: Incrementar contador de pérdidas consecutivas
-        self._consecutive_losses += 1
+        if was_loss:
+            self._consecutive_losses += 1
+        else:
+            self._consecutive_losses = 0
+
+        if is_stop:
+            self.stops_dia += 1
 
         _, fase_cfg = await self.get_phase_config()
         max_stops = fase_cfg.get("max_stops_day", 4)
         max_consecutive = fase_cfg.get("max_consecutive_losses", 3)
 
-        if self.stops_dia >= max_stops:
+        if is_stop and self.stops_dia >= max_stops:
             raise RiskException(
                 f"Límite de stops diarios alcanzado: {self.stops_dia}/{max_stops}"
             )
 
         # Fix #3: Circuit breaker por pérdidas consecutivas
-        if self._consecutive_losses >= max_consecutive:
+        if was_loss and self._consecutive_losses >= max_consecutive:
             import time
             pausa_segundos = 7200  # 2 horas
             self._loss_pause_until = time.monotonic() + pausa_segundos
@@ -590,8 +665,12 @@ class RiskManager:
                     pass
             raise RiskException(msg)
 
-        # También verificar drawdown al registrar un stop
-        await self.validate_drawdown()
+        if was_loss:
+            await self.validate_drawdown()
+
+    async def register_stop(self) -> None:
+        """Alias legacy: registra un SL con pérdida."""
+        await self.register_trade_result(was_loss=True, is_stop=True)
 
     async def is_loss_paused(self) -> bool:
         """
@@ -638,8 +717,22 @@ class RiskManager:
         hora_actual = ahora.hour
 
         _, fase_cfg = await self.get_phase_config()
-        inicio = fase_cfg.get("sesion_inicio", 14)
-        fin = fase_cfg.get("sesion_fin", 22)
 
-        # Si fin < inicio, asumimos que cruza la medianoche, pero en nuestro caso no es necesario
+        dias_excluir = fase_cfg.get("dias_excluir", [])
+        dia_actual = ahora.strftime("%A").lower()
+        if any(str(d).strip().lower() == dia_actual for d in dias_excluir):
+            logger.debug(f"Sesión bloqueada: {ahora.strftime('%A')} está en dias_excluir")
+            return False
+
+        def _hour(value: Any) -> int:
+            if isinstance(value, str):
+                return int(value.split(":")[0])
+            return int(value)
+
+        inicio = _hour(fase_cfg.get("sesion_inicio", 14))
+        fin = _hour(fase_cfg.get("sesion_fin", 22))
+
+        # Si fin < inicio, la sesión cruza la medianoche.
+        if fin < inicio:
+            return bool(hora_actual >= inicio or hora_actual < fin)
         return bool(inicio <= hora_actual < fin)

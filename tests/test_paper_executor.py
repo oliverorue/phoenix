@@ -566,6 +566,9 @@ def _make_df(close_val: float = 0.50, n_rows: int = 50):
     # Agregar ruido mínimo
     closes += np.random.normal(0, 0.001, n_rows)
     return pd.DataFrame({
+        "timestamp": pd.date_range(
+            end=pd.Timestamp.now(tz="UTC"), periods=n_rows, freq="15min",
+        ),
         "open": closes * 0.999,
         "high": closes * 1.001,
         "low": closes * 0.999,

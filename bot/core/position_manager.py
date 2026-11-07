@@ -83,6 +83,8 @@ class PositionManager:
         # 3. Señales de reversión (solo si no estamos ya en breakeven — opcional)
         if self._detect_reversal(ind_15m, ind_1h, current_price):
             logger.info("⚠️ Señal de reversión detectada, cerrando posición")
+            if hasattr(self.executor, "mark_close_reason"):
+                self.executor.mark_close_reason("close_reversal")
             self.executor.close_position()
             return "close_reversal"
 

@@ -65,6 +65,14 @@ class PaperExecutor:
         self._qty_step: float = 0.001
         self._init_qty_step()
 
+        # Balance y resultado del último cierre (para contabilidad de riesgo).
+        self.balance_scope = "allocated"
+        self._pending_close_reason = "paper_close"
+        self.last_close_pnl: Optional[float] = None
+        self.last_close_reason: str = ""
+        self.last_close_direction: Optional[str] = None
+        self.unreported_close: bool = False
+
     def _init_qty_step(self) -> None:
         """Intenta obtener qtyStep del caché de DataFeed o usa fallback."""
         try:
@@ -80,6 +88,25 @@ class PaperExecutor:
     async def set_leverage(self, leverage: int) -> None:
         """Simula ajuste de apalancamiento (solo log)."""
         logger.info(f"[PAPER] Apalancamiento configurado: {leverage}x (simulado)")
+
+    async def get_balance(self) -> float:
+        """Balance virtual actual."""
+        return self.paper_balance
+
+    def mark_close_reason(self, reason: str) -> None:
+        """Marca la razón del próximo cierre."""
+        self._pending_close_reason = reason
+
+    def consume_close_result(self) -> Optional[dict[str, Any]]:
+        """Devuelve y limpia el resultado del último cierre no reportado."""
+        if not self.unreported_close:
+            return None
+        self.unreported_close = False
+        return {
+            "pnl": self.last_close_pnl,
+            "reason": self.last_close_reason,
+            "direction": self.last_close_direction,
+        }
 
     async def open_position(
         self,
@@ -217,12 +244,19 @@ class PaperExecutor:
         )
 
         # ── Registrar en journal ──
+        reason = self._pending_close_reason
         if self.journal:
             self.journal.close(
                 exit_price=fill_exit,
-                close_reason="paper_close",
+                close_reason=reason,
                 sl_final=self.current_sl,
             )
+
+        self.last_close_pnl = pnl_net
+        self.last_close_reason = reason
+        self.last_close_direction = direction
+        self.unreported_close = True
+        self._pending_close_reason = "paper_close"
 
         # ── Resetear estado ──
         self.position_open = False
