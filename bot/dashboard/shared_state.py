@@ -20,6 +20,7 @@ class BotState:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._state: dict[str, Any] = self._default_state()
+        self._last_mtime: float = 0.0
         self._load()  # Carga el estado anterior si existe, si no crea uno nuevo
 
     def _default_state(self) -> dict[str, Any]:
@@ -88,8 +89,24 @@ class BotState:
 
     def get_state(self) -> dict[str, Any]:
         with self._lock:
+            self._reload_if_changed()
             import copy
             return copy.deepcopy(self._state)
+
+    def _reload_if_changed(self) -> None:
+        """Recarga el JSON si otro proceso (el bot) lo actualizó."""
+        try:
+            if not STATE_FILE.exists():
+                return
+            mtime = STATE_FILE.stat().st_mtime
+            if mtime <= self._last_mtime:
+                return
+            with open(STATE_FILE, 'r') as f:
+                saved = json.load(f)
+            self._state.update(saved)
+            self._last_mtime = mtime
+        except Exception:
+            pass
 
     def flush(self) -> None:
         """Guarda el estado a disco inmediatamente."""
@@ -102,6 +119,7 @@ class BotState:
                     saved = json.load(f)
                 with self._lock:
                     self._state.update(saved)
+                self._last_mtime = STATE_FILE.stat().st_mtime
             except Exception:
                 pass
 

@@ -256,6 +256,7 @@ class TradingBot:
             await self.exchange_recovery.recover_tp_orders(self.runners)
         else:
             logger.info("[PAPER] Saltando recuperación de exchange (no hay posiciones reales)")
+            self._restore_paper_state()
 
         if self.state:
             self.state.update({"active_symbols": len(self.runners)})
@@ -291,18 +292,74 @@ class TradingBot:
         """Guarda estado persistente de TODOS los runners."""
         now_iso = datetime.now(timezone.utc).isoformat()
         for runner in self.runners:
+            ex = runner.executor
             StateRecovery.save_symbol_state(runner.symbol, {
-                "position_open": runner.executor.position_open,
-                "position_type": runner.executor.position_type,
-                "entry_price": runner.executor.entry_price,
-                "current_sl": runner.executor.current_sl,
-                "tp1_price": runner.executor.tp1_price,
-                "tp2_price": runner.executor.tp2_price,
-                "balance": self.balance,
-                "quantity": runner.executor.quantity,
-                "tp1_hit": runner.executor.tp1_hit,
+                "position_open": ex.position_open,
+                "position_type": ex.position_type,
+                "entry_price": ex.entry_price,
+                "current_sl": ex.current_sl,
+                "tp1_price": ex.tp1_price,
+                "tp2_price": ex.tp2_price,
+                "balance": runner.balance,
+                "quantity": ex.quantity,
+                "tp1_hit": ex.tp1_hit,
+                "trailing_activated": ex.trailing_activated,
+                "paper_balance": getattr(ex, "paper_balance", None),
+                "entry_qty": getattr(ex, "_entry_qty", None),
+                "tp1_qty": getattr(ex, "_tp1_qty", None),
+                "tp2_qty": getattr(ex, "_tp2_qty", None),
+                "realized_net": getattr(ex, "_realized_net", None),
+                "realized_gross": getattr(ex, "_realized_gross", None),
+                "total_trades": getattr(ex, "total_trades", None),
+                "wins": getattr(ex, "wins", None),
+                "losses": getattr(ex, "losses", None),
+                "total_pnl": getattr(ex, "total_pnl", None),
+                "total_commission": getattr(ex, "total_commission", None),
                 "timestamp": now_iso,
             })
+
+    def _restore_paper_state(self) -> None:
+        """Restaura balance/posición/stats de paper tras un reinicio."""
+        from bot.core.state_recovery import StateRecovery as _SR
+
+        saved_all = _SR.load_all_symbols()
+        for runner in self.runners:
+            st = saved_all.get(runner.symbol)
+            if not st:
+                continue
+            ex = runner.executor
+            paper_balance = st.get("paper_balance")
+            if paper_balance is not None:
+                ex.paper_balance = float(paper_balance)
+                runner.balance = ex.paper_balance
+            for attr in (
+                "total_trades", "wins", "losses",
+                "total_pnl", "total_commission",
+            ):
+                if st.get(attr) is not None:
+                    setattr(ex, attr, st[attr])
+            for attr in (
+                "_entry_qty", "_tp1_qty", "_tp2_qty",
+                "_realized_net", "_realized_gross",
+            ):
+                if st.get(attr.lstrip("_")) is not None:
+                    setattr(ex, attr, st[attr.lstrip("_")])
+            if st.get("position_open"):
+                ex.position_open = True
+                ex.position_type = st.get("position_type")
+                ex.entry_price = float(st.get("entry_price") or 0.0)
+                ex.quantity = float(st.get("quantity") or 0.0)
+                ex.current_sl = float(st.get("current_sl") or 0.0)
+                ex.tp1_price = float(st.get("tp1_price") or 0.0)
+                ex.tp2_price = float(st.get("tp2_price") or 0.0)
+                ex.tp1_hit = bool(st.get("tp1_hit", False))
+                ex.trailing_activated = bool(st.get("trailing_activated", False))
+                logger.warning(
+                    f"♻️ Paper: posición restaurada {runner.symbol} "
+                    f"{ex.position_type} x{ex.quantity} @ {ex.entry_price}"
+                )
+        if self.runners:
+            self.balance = sum(r.balance for r in self.runners)
 
     @trace(attributes={"component": "TradingBot"})
     async def _update_dashboard_state(self) -> None:
@@ -368,6 +425,7 @@ class TradingBot:
 
             # Calcular equity = balance + unrealized PnL
             equity = (self.balance or 0.0) + total_unrealized_pnl_usdt
+            self.equity = equity
             unrealized_pnl_pct = 0.0
             if self.balance and self.balance > 0:
                 unrealized_pnl_pct = (total_unrealized_pnl_usdt / self.balance) * 100
@@ -394,6 +452,11 @@ class TradingBot:
                 equity_history = equity_history[-200:]
 
             self.state.update({
+                "bot_running": True,
+                "mode": (
+                    "PAPER" if PAPER_TRADING_ENABLED
+                    else ("TESTNET" if TESTNET else "LIVE")
+                ),
                 "symbol": primary.symbol,
                 "symbols": symbols_state,
                 "testnet": TESTNET,
@@ -485,18 +548,26 @@ class TradingBot:
             if self.metrics_exporter is not None:
                 self.metrics_exporter.update()
 
-            # Si WebSocket está activo, esperar menos tiempo
+            # Esperar de forma interrumpible: un SIGTERM debe cortar el sleep.
             if WS_ENABLED and any(f.connected for f in self.ws_feeds.values()):
-                await asyncio.sleep(5)  # ciclo rápido con WS
+                wait_seconds = 5.0
             else:
-                await DataFeed.wait_for_next_candle(15)
+                wait_seconds = DataFeed.seconds_until_next_candle(15)
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=wait_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
 
         # ── Shutdown graceful gestionado por GracefulShutdown ──
         await shutdown_ctl.shutdown()
 
 
 async def main() -> None:
-    bot = TradingBot()
+    from bot.dashboard.shared_state import bot_state
+
+    bot = TradingBot(state_manager=bot_state)
     await bot._async_init()
     stop_event = asyncio.Event()
 

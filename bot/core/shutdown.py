@@ -184,6 +184,12 @@ class GracefulShutdown:
                     logger.warning(f"⚠️ Error deteniendo WS feed: {exc}")
 
         # ── Fase 6: Guardar estado final ──────────────────────────────
+        if getattr(bot, "state", None):
+            try:
+                bot.state.update({"bot_running": False, "mode": "STOPPED"})
+                bot.state.flush()
+            except Exception as exc:
+                logger.warning(f"⚠️ Error marcando bot detenido: {exc}")
         if hasattr(bot, "_save_cycle_state"):
             try:
                 bot._save_cycle_state()

@@ -219,16 +219,23 @@ class DataFeed:
     # ── Espera sincronizada con velas (sin WebSocket) ─
 
     @staticmethod
+    @staticmethod
+    def seconds_until_next_candle(interval_minutes: int = 15) -> float:
+        """Segundos hasta el inicio de la siguiente vela (+2 s de margen)."""
+        now = datetime.now(timezone.utc)
+        seconds_per_candle = interval_minutes * 60
+        elapsed = now.timestamp() % seconds_per_candle
+        return float(seconds_per_candle - elapsed + 2)
+
+    @staticmethod
     async def wait_for_next_candle(interval_minutes: int = 15) -> None:
         """
         Espera hasta el inicio de la siguiente vela.
         Ejemplo: si interval=15 y son las 12:03, espera hasta 12:15:02.
         """
-        now = datetime.now(timezone.utc)
-        seconds_per_candle = interval_minutes * 60
-        elapsed = now.timestamp() % seconds_per_candle
-        remaining = seconds_per_candle - elapsed + 2  # +2 seg de margen
-        await asyncio.sleep(remaining)
+        await asyncio.sleep(
+            DataFeed.seconds_until_next_candle(interval_minutes)
+        )
 
     async def get_spread_percent(self) -> float:
         """Obtiene el spread actual (bid-ask) en porcentaje via order book (async)."""

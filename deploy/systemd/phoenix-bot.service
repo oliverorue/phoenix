@@ -1,0 +1,23 @@
+[Unit]
+Description=Phoenix paper/live trading bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@LINK_DIR@
+ExecStart=/usr/bin/python3 -m bot.main
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=always
+RestartSec=10
+TimeoutStopSec=35
+KillSignal=SIGTERM
+Nice=10
+CPUQuota=50%
+MemoryHigh=350M
+MemoryMax=500M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

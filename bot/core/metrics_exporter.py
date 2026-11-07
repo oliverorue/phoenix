@@ -407,6 +407,7 @@ class MetricsExporter:
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "balance": getattr(bot, "balance", 0.0),
+            "equity": round(getattr(bot, "equity", 0.0) or 0.0, 2),
             "active_symbols": len(runners),
             "symbol_balances": symbol_balances,
             "portfolio": {

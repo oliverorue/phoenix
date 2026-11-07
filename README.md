@@ -112,8 +112,50 @@ El dashboard **no** puede iniciar/detener el bot en Docker
 
 ```bash
 python -m bot.main
-# Dashboard: http://localhost:8502
 ```
+
+### 4. Correr 24/7 como servicio (recomendado)
+
+Instala bot y dashboard como servicios de usuario de systemd:
+
+```bash
+./scripts/install_phoenix_services.sh
+```
+
+Esto:
+
+- Arranca el bot y el dashboard automáticamente al iniciar sesión/encender la notebook.
+- Reinicia el bot si se cae (`Restart=always`).
+- Limita RAM/CPU para no afectar la notebook.
+- Publica el dashboard solo en `127.0.0.1:8502`.
+- Crea el lanzador **Phoenix Workspace** en el menú de aplicaciones.
+
+Comandos útiles:
+
+```bash
+systemctl --user status phoenix-bot
+systemctl --user status phoenix-dashboard
+journalctl --user -u phoenix-bot -f
+~/.local/bin/phoenix status
+~/.local/bin/phoenix report
+~/.local/bin/phoenix stop
+```
+
+Para detener solo el dashboard y liberar RAM:
+
+```bash
+systemctl --user stop phoenix-dashboard
+```
+
+Para volver a abrirlo:
+
+```bash
+~/.local/bin/phoenix dashboard
+```
+
+> Si la notebook se apaga, el bot no corre. Para operación 24/7 real hace falta
+> un VPS o una máquina que quede encendida; systemd solo garantiza que vuelva
+> a arrancar cuando la notebook se encienda.
 
 ---
 
@@ -233,14 +275,15 @@ trading_bot/
 Monitor en tiempo real via Streamlit:
 
 ```bash
-# El dashboard se inicia automáticamente con el bot
-# Abre: http://localhost:8502
+# Con systemd:
+~/.local/bin/phoenix dashboard
+# Abre: http://127.0.0.1:8502
 ```
 
 **Métricas clave:**
 - Balance actual y PnL diario
 - Trades activos e historial reciente
-- Señales con score (solo ≥ 80 se ejecutan)
+- Señales con score (mínimo configurable; 35 por defecto)
 - Drawdown y límites de riesgo
 - Distribución LONG/SHORT
 
