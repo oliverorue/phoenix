@@ -722,6 +722,7 @@ class RiskManager:
         dia_actual = ahora.strftime("%A").lower()
         if any(str(d).strip().lower() == dia_actual for d in dias_excluir):
             logger.debug(f"Sesión bloqueada: {ahora.strftime('%A')} está en dias_excluir")
+            self._session_active = False
             return False
 
         def _hour(value: Any) -> int:
@@ -734,5 +735,7 @@ class RiskManager:
 
         # Si fin < inicio, la sesión cruza la medianoche.
         if fin < inicio:
-            return bool(hora_actual >= inicio or hora_actual < fin)
-        return bool(inicio <= hora_actual < fin)
+            self._session_active = bool(hora_actual >= inicio or hora_actual < fin)
+        else:
+            self._session_active = bool(inicio <= hora_actual < fin)
+        return self._session_active

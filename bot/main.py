@@ -444,7 +444,11 @@ class TradingBot:
         health_monitor = HealthMonitor(
             data_feed=self.runners[0].data_feed,
             notifier=self.notifier,
-            interval=300
+            interval=300,
+            paper_mode=PAPER_TRADING_ENABLED,
+            balance_provider=lambda: (
+                self.runners[0].balance if self.runners else self.balance
+            ),
         )
         # Crear stop_event si no se proveyó (ANTES de crear health_task)
         if stop_event is None:

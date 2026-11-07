@@ -15,16 +15,23 @@ from bot.core.tracing import trace
 class HealthMonitor:
     """Ejecuta health checks dentro del loop asíncrono del bot."""
 
-    def __init__(self, data_feed: Any, notifier: Any = None, interval: int = 300) -> None:
+    def __init__(
+        self, data_feed: Any, notifier: Any = None, interval: int = 300,
+        paper_mode: bool = False, balance_provider: Any = None,
+    ) -> None:
         """
         Args:
             data_feed: instancia de DataFeed para verificar API y datos.
             notifier: instancia de Notifier para enviar alertas (opcional).
             interval: segundos entre chequeos (default 5 minutos).
+            paper_mode: si True, no consulta endpoints privados.
+            balance_provider: callable que devuelve el balance paper/live.
         """
         self.data_feed = data_feed
         self.notifier = notifier
         self.interval = interval
+        self.paper_mode = paper_mode
+        self.balance_provider = balance_provider
         self._consecutive_api_failures = 0
         self._consecutive_data_failures = 0
         self._consecutive_latency_warnings = 0
@@ -79,7 +86,7 @@ class HealthMonitor:
             if self._consecutive_api_failures >= 3:
                 self.notifier.send(
                     "🔴 API no responde",
-                    f"La API de Bybit falló {self._consecutive_api_failures} veces consecutivas.",
+                    f"La API de Binance falló {self._consecutive_api_failures} veces consecutivas.",
                     severity="CRITICAL",
                     alert_type="error"
                 )
@@ -121,7 +128,19 @@ class HealthMonitor:
 
     @trace(attributes={"component": "HealthMonitor"})
     async def _check_api(self) -> bool:
-        """Verifica conectividad con Bybit."""
+        """Verifica conectividad con Binance (o balance paper)."""
+        if self.paper_mode:
+            try:
+                balance = (
+                    float(self.balance_provider())
+                    if self.balance_provider is not None
+                    else 0.0
+                )
+                logger.debug(f"Health paper OK, balance virtual: {balance:.2f}")
+                return True
+            except Exception as e:
+                logger.error(f"Health check paper falló: {e}")
+                return False
         try:
             balance = await self.data_feed.get_balance()
             if balance <= 0:

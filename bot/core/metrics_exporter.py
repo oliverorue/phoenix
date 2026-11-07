@@ -211,24 +211,13 @@ class MetricsExporter:
         active = len(getattr(bot, "runners", []) or [])
         self._g_active_symbols.set(active)
 
-        # Sesión activa desde el primer runner
+        # Sesión activa cacheada por RiskManager.is_trading_session().
         session_active = 1.0
         try:
             primary = bot.runners[0] if bot.runners else None
             if primary and hasattr(primary, "risk_mgr"):
-                sa = primary.risk_mgr.is_trading_session()
-                if callable(sa):
-                    import asyncio
-                    try:
-                        loop = asyncio.get_running_loop()
-                        if loop.is_running():
-                            session_active = 1.0  # no podemos await aquí (sync)
-                        else:
-                            session_active = 1.0
-                    except RuntimeError:
-                        session_active = 1.0
-                else:
-                    session_active = 1.0 if sa else 0.0
+                cached = getattr(primary.risk_mgr, "_session_active", True)
+                session_active = 1.0 if cached else 0.0
         except Exception:
             pass
         self._g_session_active.set(session_active)
@@ -453,7 +442,7 @@ class MetricsExporter:
         if self._http_started:
             return
         try:
-            start_http_server(self.port, registry=self._registry)  # type: ignore[arg-type]
+            start_http_server(self.port, registry=self._registry)
             self._http_started = True
             logger.info(f"📊 Métricas Prometheus en http://0.0.0.0:{self.port}/metrics")
         except Exception as e:
@@ -477,4 +466,4 @@ def generate_metrics_text(registry: Any = None) -> str:
     if not _HAS_PROMETHEUS:
         return "# prometheus_client no disponible"
     reg = registry if registry is not None else REGISTRY
-    return generate_latest(reg).decode("utf-8")  # type: ignore[arg-type]
+    return generate_latest(reg).decode("utf-8")
