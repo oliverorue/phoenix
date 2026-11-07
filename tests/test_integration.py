@@ -179,7 +179,7 @@ class TestEndToEndIntegration:
                 with patch.object(bot, "_save_cycle_state", new=MagicMock()):
                     with patch("bot.main.DataFeed.wait_for_next_candle", new=AsyncMock()):
                         await asyncio.gather(
-                            bot.run(stop_event),
+                            bot.run(stop_event, allow_trading=True),
                             run_and_stop(),
                         )
 
@@ -237,7 +237,7 @@ class TestEndToEndIntegration:
                 with patch.object(bot, "_save_cycle_state", new=MagicMock()):
                     with patch("bot.main.DataFeed.wait_for_next_candle", new=AsyncMock()):
                         await asyncio.gather(
-                            bot.run(stop_event),
+                            bot.run(stop_event, allow_trading=True),
                             run_and_stop(),
                         )
 
@@ -292,7 +292,7 @@ class TestEndToEndIntegration:
                 with patch.object(bot, "_save_cycle_state", new=MagicMock()) as mock_save:
                     with patch("bot.main.DataFeed.wait_for_next_candle", new=AsyncMock()):
                         await asyncio.gather(
-                            bot.run(stop_event),
+                            bot.run(stop_event, allow_trading=True),
                             run_and_stop(),
                         )
 

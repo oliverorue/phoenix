@@ -1,9 +1,13 @@
-# 🔥 Phoenix — Binance USDⓈ-M Futures Scalping Bot
+# 🔥 Phoenix — Binance USDⓈ-M Futures Signal Monitor
 
-> **Versión:** v5.1 — Calibrado para capital mínimo de **$50 USD**
+> **Modo actual: monitor-only.** Phoenix **no ejecuta órdenes**. Muestra señales,
+> SL/TP y tamaño sugerido para operar manualmente. El trading paper/live está
+> deshabilitado a nivel de entrypoint, dashboard y servicios.
+>
+> **Versión:** v5.1 — Señales calibradas para capital mínimo de **$50 USD**
 > 
-> Bot de scalping algorítmico para Binance Futures, con estrategia basada en pullbacks,
-> fases de escalamiento automático, Kelly sizing dinámico y paper trading.
+> Monitor de scalping algorítmico para Binance Futures, con estrategia basada en pullbacks,
+> fases de escalamiento y dimensionamiento sugerido. El backtester sigue disponible para validación.
 
 ---
 
@@ -23,6 +27,9 @@
 ---
 
 ## ✨ Características
+
+> **Nota:** las capacidades de ejecución (paper/live, trailing, breakeven)
+> describen el motor legacy y **no están activas** en este build monitor-only.
 
 - **Scalping en pullbacks** — Entra en retrocesos dentro de tendencias fuertes (ADX > 22)
 - **Multi-timeframe** — Tendencia en 1h, entrada en 15m
@@ -85,33 +92,22 @@ TESTNET=true        # true para pruebas, false para real
 python -c "from config.loader import validate_config; msgs = validate_config(raise_on_error=False); print('\n'.join(msgs))"
 ```
 
-### 2b. Modo de ejecución y seguridad
+### 2b. Modo monitor-only (actual)
 
-`exchange.testnet` en `config/settings.yaml` es la fuente principal:
+`monitor_only: true` en `config/settings.yaml` deshabilita toda ejecución de
+órdenes. El monitor usa datos públicos de Binance y **no requiere API keys
+privadas**; solo necesita `TELEGRAM_TOKEN`/`DISCORD_WEBHOOK` si querés alertas.
 
-```yaml
-exchange:
-  testnet: true   # true = Testnet, false = Mainnet
-```
-
-Si también definís `TESTNET` en `secrets.env`, **debe coincidir** con
-`settings.yaml`; si no, el bot se niega a arrancar.
-
-Para operar en mainnet real (`paper_trading.enabled: false` +
-`exchange.testnet: false`) se exige una confirmación explícita:
-
-```bash
-LIVE_TRADING_CONFIRMED=true
-```
-
-Sin esa variable, sin API keys válidas o sin balance real, el bot no arranca.
-El dashboard **no** puede iniciar/detener el bot en Docker
-(`PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false`).
+Las secciones de testnet/mainnet y `LIVE_TRADING_CONFIRMED` quedan como
+referencia histórica del motor de trading, que ya no está en el camino
+operativo. El dashboard no puede iniciar/detener el bot.
 
 ### 3. Iniciar
 
 ```bash
-python -m bot.main
+python3 -m bot.monitor
+# o una sola evaluación:
+python3 -m bot.monitor --once
 ```
 
 ### 4. Correr 24/7 como servicio (recomendado)

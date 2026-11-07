@@ -1,12 +1,12 @@
 [Unit]
-Description=Phoenix paper/live trading bot
+Description=Phoenix signal monitor (monitor-only)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=@LINK_DIR@
-ExecStart=/usr/bin/python3 -m bot.main
+ExecStart=/usr/bin/python3 -m bot.monitor
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=always

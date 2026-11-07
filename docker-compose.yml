@@ -10,7 +10,7 @@
 
 services:
 
-  # ─── Bot Principal (con watchdog) ────────────────────────────────
+  # ─── Monitor de señales (monitor-only, sin ejecución) ────────────
   bot:
     build:
       context: .
@@ -43,7 +43,7 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import os; exit(0 if os.path.exists(\"data/bot_state_persistent.json\") else 1)'"]
+      test: ["CMD-SHELL", "pgrep -f 'bot.monitor' > /dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -5,6 +5,7 @@ Streamlit no se puede probar directamente sin su entorno, pero sí las helpers.
 """
 
 import pandas as pd
+import pytest
 from unittest.mock import patch
 
 
@@ -185,7 +186,14 @@ class TestDashboardSavePortfolio:
 # ─────────────────────────────────────────────────────────────
 
 class TestBotController:
-    """Verifica BotController."""
+    """Verifica BotController (mecánica legacy con control habilitado)."""
+
+    @pytest.fixture(autouse=True)
+    def _legacy_control(self):
+        import bot.dashboard.bot_controller as controller_module
+
+        with patch.object(controller_module, "MONITOR_ONLY", False):
+            yield
 
     def test_controller_init(self):
         from bot.dashboard.bot_controller import BotController

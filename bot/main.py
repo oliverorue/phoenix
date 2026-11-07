@@ -8,7 +8,7 @@ from typing import Any, Optional
 import yaml
 from pathlib import Path
 
-from config.loader import SYMBOL, TESTNET, WS_ENABLED
+from config.loader import MONITOR_ONLY, SYMBOL, TESTNET, WS_ENABLED
 from config.loader import (
     PAPER_TRADING_ENABLED, PAPER_INITIAL_BALANCE, PAPER_SLIPPAGE_PCT,
     PAPER_COMMISSION_PCT, PAPER_MAKER_COMMISSION_PCT,
@@ -518,7 +518,13 @@ class TradingBot:
 
     @trace(attributes={"component": "TradingBot"})
     async def run(self, stop_event: Optional[asyncio.Event] = None,
-                  shutdown_ctl: Optional[GracefulShutdown] = None) -> None:
+                  shutdown_ctl: Optional[GracefulShutdown] = None,
+                  allow_trading: bool = False) -> None:
+        if MONITOR_ONLY and not allow_trading:
+            raise RuntimeError(
+                "Trading deshabilitado: build monitor-only. "
+                "Usá `python3 -m bot.monitor` para recibir señales."
+            )
         logger.info(f"🔥 Phoenix iniciado con {len(self.runners)} par(es)")
         await self.scheduler.start()
         health_monitor = HealthMonitor(
@@ -582,6 +588,13 @@ class TradingBot:
 
 
 async def main() -> None:
+    if MONITOR_ONLY:
+        from bot.monitor import run_from_config
+
+        logger.info("🔍 Modo monitor-only: sin ejecución de órdenes.")
+        await run_from_config()
+        return
+
     from bot.dashboard.shared_state import bot_state
 
     bot = TradingBot(state_manager=bot_state)

@@ -15,6 +15,7 @@ from typing import Any, Optional
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
+from config.loader import MONITOR_ONLY
 from bot.main import TradingBot
 from bot.dashboard.shared_state import bot_state
 
@@ -35,10 +36,13 @@ class BotController:
     def control_allowed() -> bool:
         """True si el dashboard puede iniciar/detener el bot.
 
-        En Docker/producción se desactiva con
+        En modo monitor-only el control siempre está deshabilitado. En
+        Docker/producción también se desactiva con
         ``PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false`` para evitar un
         segundo bot contra la misma cuenta API.
         """
+        if MONITOR_ONLY:
+            return False
         return os.getenv(
             "PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
@@ -51,6 +55,11 @@ class BotController:
 
     def start(self) -> bool:
         """Inicia el bot. NO bloquea — actualiza estado inmediatamente."""
+        if MONITOR_ONLY:
+            logger.warning(
+                "Control del bot deshabilitado: build monitor-only (sin ejecución)."
+            )
+            return False
         if not self.control_allowed():
             logger.warning(
                 "Control del bot deshabilitado desde el dashboard "

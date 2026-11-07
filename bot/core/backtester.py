@@ -331,8 +331,11 @@ class BacktestEngine:
                     ts = int(c[0])
                     if ts >= start_ms:
                         collected.append([c[0], c[1], c[2], c[3], c[4], c[5], c[7]])
-                oldest = int(candles[-1][0])
-                if oldest <= start_ms:
+                # Binance devuelve las velas en orden ascendente: la más
+                # antigua es candles[0], no candles[-1]. Usar la última
+                # hacía retroceder de a una vela por request.
+                oldest = int(candles[0][0])
+                if oldest <= start_ms or oldest >= cursor:
                     break
                 cursor = oldest - 1
                 time.sleep(0.3)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Watchdog avanzado: health checks de sistema, API y datos.
-Reinicia el bot si detecta fallos críticos.
+Reinicia el monitor si detecta fallos críticos.
 Notifica por Telegram/Discord cuando hay problemas.
 """
 
@@ -55,14 +55,14 @@ def check_system() -> bool:
 
 
 async def _check_api_async() -> bool:
-    """Versión async del health check de API."""
+    """Versión async del health check de API (solo datos públicos)."""
     from bot.core.data_feed import DataFeed
     feed = DataFeed(symbol="XRPUSDT", testnet=False)
-    balance = await feed.get_balance()
-    if balance <= 0:
-        logger.warning("API respondió pero balance es 0")
-    else:
-        logger.debug(f"Health API OK, balance: {balance:.2f}")
+    df = await feed.current_15m()
+    if df.empty:
+        logger.warning("API respondió sin velas")
+        return False
+    logger.debug("Health API OK (datos públicos)")
     return True
 
 
@@ -84,7 +84,7 @@ async def _check_data_async() -> bool:
 
 
 def check_api() -> bool:
-    """Verifica conectividad con Bybit (wrapper sync)."""
+    """Verifica conectividad con Binance (wrapper sync)."""
     try:
         return asyncio.run(_check_api_async())
     except Exception as e:
@@ -110,12 +110,12 @@ def run() -> None:
 
     while True:
         attempt += 1
-        logger.info(f"Iniciando bot (intento #{attempt})")
+        logger.info(f"Iniciando monitor (intento #{attempt})")
         if notifier:
-            notifier.send("🤖 Watchdog", f"Iniciando bot (intento #{attempt})", "INFO", alert_type="watchdog_restart")
+            notifier.send("🤖 Watchdog", f"Iniciando monitor (intento #{attempt})", "INFO", alert_type="watchdog_restart")
 
         proc = subprocess.Popen(
-            [sys.executable, "-m", "bot.main"],
+            [sys.executable, "-m", "bot.monitor"],
             cwd=ROOT,
         )
 
@@ -145,9 +145,9 @@ def run() -> None:
             time.sleep(10)
 
         if proc.returncode == 0:
-            logger.info("Bot detenido normalmente. Watchdog terminando.")
+            logger.info("Monitor detenido normalmente. Watchdog terminando.")
             if notifier:
-                notifier.send("✅ Watchdog", "Bot detenido normalmente", "SUCCESS", alert_type="watchdog_stop")
+                notifier.send("✅ Watchdog", "Monitor detenido normalmente", "SUCCESS", alert_type="watchdog_stop")
             break
 
         now = time.time()
@@ -156,13 +156,13 @@ def run() -> None:
 
         crash_count = len(crash_times)
         logger.warning(
-            f"Bot terminó con código {proc.returncode} "
+            f"Monitor terminó con código {proc.returncode} "
             f"({crash_count} crashes en {CRASH_WINDOW // 60} min)"
         )
 
         if notifier:
             notifier.send("🔄 Watchdog: Reinicio",
-                          f"Bot crash con código {proc.returncode} ({crash_count}/{MAX_CRASHES} en {CRASH_WINDOW//60}min)",
+                          f"Monitor crash con código {proc.returncode} ({crash_count}/{MAX_CRASHES} en {CRASH_WINDOW//60}min)",
                           "WARNING", alert_type="watchdog_crash")
 
         if crash_count >= MAX_CRASHES:

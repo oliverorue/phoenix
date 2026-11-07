@@ -1,10 +1,14 @@
 # AGENTS.md — Phoenix v5.1
 
+> **Modo actual: monitor-only.** Este build **NO ejecuta órdenes**. El único
+> proceso operativo es el monitor de señales; el trading paper/live está
+> deshabilitado. No reactivar la ejecución sin pedido explícito del usuario.
+
 Este archivo es la referencia obligatoria para cualquier agente que trabaje en este repositorio. Antes de tocar código, leerlo y respetar sus invariantes.
 
 ## Contexto del proyecto
 
-Phoenix es un bot algorítmico de scalping para **Binance USDⓈ-M Futures**. Corre en tres modos: backtest, paper trading y real (testnet/mainnet). Incluye:
+Phoenix es un **monitor de señales** para **Binance USDⓈ-M Futures**. Muestra entradas, SL/TP, tamaño sugerido y contexto de riesgo; no envía órdenes. El backtester y la estrategia siguen disponibles para validación. Incluye:
 
 - Dimensionamiento dinámico con Criterio de Kelly.
 - VaR paramétrico y límites de exposición/correlación.
@@ -12,7 +16,16 @@ Phoenix es un bot algorítmico de scalping para **Binance USDⓈ-M Futures**. Co
 - Journal de trades, auditoría local y exportación de métricas a Prometheus.
 - Dashboard de monitoreo en Streamlit.
 
-El objetivo inmediato **no es aumentar rentabilidad**: es hacer que datos, riesgo, ejecución y backtest sean correctos y reproducibles. Respetar el plan `plans/improvement_plan_2026-11.md`.
+El objetivo inmediato **no es aumentar rentabilidad**: es hacer que datos, riesgo y backtest sean correctos y reproducibles. Respetar el plan `plans/improvement_plan_2026-11.md`.
+
+## Modo monitor-only (invariante actual)
+
+- `monitor_only: true` en `config/settings.yaml` → `MONITOR_ONLY` en `config/loader.py`.
+- Entrypoint operativo: `python3 -m bot.monitor` (o `python3 bot/monitor.py`).
+- `python3 -m bot.main` delega al monitor; `TradingBot.run()` exige `allow_trading=True`.
+- El dashboard no puede iniciar/detener el bot (`BotController.control_allowed()` = `False`).
+- Systemd, Docker y los scripts de arranque ejecutan `bot.monitor`.
+- No reintroducir ejecución de órdenes, API keys privadas ni `PaperExecutor` en el camino operativo.
 
 ## Stack real (no inventar tecnologías)
 

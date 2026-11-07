@@ -96,10 +96,11 @@ class TestBacktestEngineFetchHistory:
         # el while True loop en fetch_history() rompa (oldest <= start_ms)
         start_ms = int(pd.Timestamp("2026-01-01", tz="UTC").timestamp() * 1000)  # type: ignore[attr-defined]
         ts2 = int(pd.Timestamp("2026-01-01 00:15", tz="UTC").timestamp() * 1000)  # type: ignore[attr-defined]
-        # Mock de futures_klines de python-binance: retorna list[list] directamente
+        # Mock de futures_klines de python-binance: retorna list[list]
+        # en orden ascendente, como la API real (la más antigua primero).
         mock_klines = [
-            [ts2, "0.6190", "0.6200", "0.6185", "0.6195", "100000", ts2 + 899999, "61950.00", 100, "50000", "40000", "0"],
             [start_ms, "0.6185", "0.6192", "0.6183", "0.6190", "123456", start_ms + 899999, "76345.67", 120, "60000", "50000", "0"],
+            [ts2, "0.6190", "0.6200", "0.6185", "0.6195", "100000", ts2 + 899999, "61950.00", 100, "50000", "40000", "0"],
         ]
         engine.data_feed._rest.futures_klines.return_value = mock_klines
         result = engine.fetch_history("2026-01-01", "2026-01-10", "15")
@@ -116,6 +117,37 @@ class TestBacktestEngineFetchHistory:
         result = engine.fetch_history("2026-01-01", "2026-01-10", "15")
         assert isinstance(result, pd.DataFrame)
         assert result.empty
+
+    def test_fetch_history_paginates_by_oldest_candle(self):
+        """Regresión: la paginación debe retroceder desde candles[0].
+
+        Si se usa candles[-1] (la vela más nueva), el cursor avanza una
+        sola vela por request y una descarga de 1 mes tarda ~30 min.
+        """
+        engine = self._make_engine()
+        start_ms = int(pd.Timestamp("2026-01-01", tz="UTC").timestamp() * 1000)  # type: ignore[attr-defined]
+        step = 15 * 60 * 1000
+        t1 = start_ms
+        t2 = start_ms + step
+        t3 = start_ms + 2 * step
+        t4 = start_ms + 3 * step
+        t5 = start_ms + 4 * step
+
+        def candle(ts):
+            return [ts, "1", "1", "1", "1", "1", ts + 899999, "1", 1, "1", "1", "0"]
+
+        engine.data_feed._rest.futures_klines.side_effect = [
+            [candle(t3), candle(t4), candle(t5)],
+            [candle(t1), candle(t2)],
+            [],
+        ]
+
+        result = engine.fetch_history("2026-01-01", "2026-01-10", "15")
+
+        assert len(result) == 5
+        calls = engine.data_feed._rest.futures_klines.call_args_list
+        assert len(calls) == 2
+        assert calls[1].kwargs["endTime"] == t3 - 1
 
 
 class TestBacktestEngineRun:

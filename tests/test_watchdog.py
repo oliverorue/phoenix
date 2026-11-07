@@ -100,10 +100,13 @@ class TestWatchdogAsyncChecks:
     """Verifica las funciones async internas con mocks."""
 
     @pytest.mark.asyncio
-    async def test_check_api_async_calls_get_balance(self):
+    async def test_check_api_async_uses_public_data(self):
+        import pandas as pd
+
+        df = pd.DataFrame({"close": [1.0]})
         with patch("bot.core.data_feed.DataFeed") as mock_feed_cls:
             feed = MagicMock()
-            feed.get_balance = AsyncMock(return_value=150.0)
+            feed.current_15m = AsyncMock(return_value=df)
             mock_feed_cls.return_value = feed
 
             from bot.watchdog import _check_api_async
@@ -111,15 +114,17 @@ class TestWatchdogAsyncChecks:
             assert result is True
 
     @pytest.mark.asyncio
-    async def test_check_api_async_zero_balance(self):
+    async def test_check_api_async_empty_data_returns_false(self):
+        import pandas as pd
+
         with patch("bot.core.data_feed.DataFeed") as mock_feed_cls:
             feed = MagicMock()
-            feed.get_balance = AsyncMock(return_value=0.0)
+            feed.current_15m = AsyncMock(return_value=pd.DataFrame())
             mock_feed_cls.return_value = feed
 
             from bot.watchdog import _check_api_async
             result = await _check_api_async()
-            assert result is True
+            assert result is False
 
     @pytest.mark.asyncio
     async def test_check_data_async_with_recent_data(self):

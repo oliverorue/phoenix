@@ -18,7 +18,7 @@ case "${1:-status}" in
         systemctl --user start phoenix-dashboard.service
         sleep 2
         systemctl --user --no-pager --lines=5 status phoenix-bot.service
-        echo "Dashboard: http://127.0.0.1:8502"
+        echo "Monitor iniciado. Dashboard: http://127.0.0.1:8502"
         ;;
     stop)
         systemctl --user stop phoenix-dashboard.service 2>/dev/null || true
@@ -35,23 +35,9 @@ case "${1:-status}" in
         systemctl --user --no-pager --lines=8 status phoenix-bot.service || true
         echo "--- Dashboard ---"
         systemctl --user --no-pager --lines=5 status phoenix-dashboard.service || true
-        echo "--- Estado ---"
-        python3 - <<'PY'
-import json
-from pathlib import Path
-
-state = Path("bot/dashboard/bot_state.json")
-metrics = Path("data/metrics.json")
-p = state if state.exists() else metrics
-if p.exists():
-    d = json.loads(p.read_text())
-    print("balance:", d.get("balance"))
-    print("equity:", d.get("equity"))
-    print("posiciones:", d.get("positions") or "sin posición")
-    print("riesgo:", d.get("risk"))
-else:
-    print("sin estado disponible")
-PY
+        echo "--- Modo ---"
+        echo "Monitor-only: el bot no ejecuta órdenes."
+        echo "Señal puntual: python3 -m bot.monitor --once"
         ;;
     logs)
         journalctl --user -u phoenix-bot -f
@@ -69,6 +55,7 @@ PY
         exec "$REPO_DIR/scripts/phoenix_workspace.sh"
         ;;
     report)
+        echo "Modo monitor-only: reporte histórico (el bot ya no opera)."
         python3 - <<'PY'
 import json
 import sqlite3

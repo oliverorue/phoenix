@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# Script de arranque de Phoenix — Binance Futures Scalping Bot
+# Script de arranque de Phoenix — Signal Monitor (monitor-only)
 # Uso: ./scripts/start.sh
 # ============================================================
 
@@ -33,9 +33,9 @@ if ! python3 -c "import yaml, dotenv, loguru" 2>/dev/null; then
     pip install -r requirements.txt
 fi
 
-# Iniciar el bot con watchdog (reinicio automático)
-echo -e "${GREEN}🚀 Iniciando bot con Watchdog...${NC}"
-python bot/watchdog.py
+# Iniciar el monitor de señales (sin ejecución de órdenes)
+echo -e "${GREEN}📡 Iniciando monitor de señales (monitor-only)...${NC}"
+python3 -m bot.monitor
 
-# Si el bot se detiene, mostrar mensaje
-echo -e "${YELLOW}⏹️ Bot detenido - $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+# Si el monitor se detiene, mostrar mensaje
+echo -e "${YELLOW}⏹️ Monitor detenido - $(date '+%Y-%m-%d %H:%M:%S')${NC}"

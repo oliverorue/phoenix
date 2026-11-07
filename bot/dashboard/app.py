@@ -24,7 +24,7 @@ from bot.dashboard.shared_state import bot_state
 from bot.dashboard.bot_controller import controller
 from config.loader import (
     BOT_NAME, BOT_VERSION, BOT_EMOJI, LOG_DIR,
-    SUPPORTED_COINS, FASES_ESCALAMIENTO,
+    MONITOR_ONLY, SUPPORTED_COINS, FASES_ESCALAMIENTO,
 )
 from bot.core.database import DatabaseManager
 
@@ -917,10 +917,16 @@ with st.sidebar:
     # ── Controles ──
     control_allowed = controller.control_allowed()
     if not control_allowed:
-        st.caption(
-            "🔒 Control del bot deshabilitado desde el dashboard. "
-            "Usá el proceso/servicio del bot."
-        )
+        if MONITOR_ONLY:
+            st.caption(
+                "📡 Modo monitor-only: el dashboard no inicia ni detiene "
+                "trading. Señales: `python3 -m bot.monitor --once`."
+            )
+        else:
+            st.caption(
+                "🔒 Control del bot deshabilitado desde el dashboard. "
+                "Usá el proceso/servicio del bot."
+            )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -947,8 +953,12 @@ with st.sidebar:
     s = bot_state.get_state()
     running = s.get("bot_running", False)
     
-    dot_class = "on" if running else "off"
-    status_text = "🟢 OPERANDO" if running else "🔴 DETENIDO"
+    if MONITOR_ONLY:
+        dot_class = "on"
+        status_text = "📡 MONITOR-ONLY (sin ejecución)"
+    else:
+        dot_class = "on" if running else "off"
+        status_text = "🟢 OPERANDO" if running else "🔴 DETENIDO"
     st.markdown(f'<div style="display:flex;align-items:center;gap:8px;font-size:0.9rem;font-weight:600">'
                 f'<span class="status-dot {dot_class}"></span>{status_text}</div>',
                 unsafe_allow_html=True)
@@ -1638,11 +1648,18 @@ with tabs[6]:
         st.markdown(f'<div class="glass-card">', unsafe_allow_html=True)
         
         # Status row
-        dot_class = "on" if running else "off"
+        if MONITOR_ONLY:
+            dot_class = "on"
+            bot_label = "📡 MONITOR-ONLY"
+            bot_status_text = "Sin ejecución"
+        else:
+            dot_class = "on" if running else "off"
+            bot_label = "Bot"
+            bot_status_text = "🟢 Corriendo" if running else "🔴 Detenido"
         st.markdown(
             f'<div style="display:flex;justify-content:space-between;margin-bottom:8px">'
-            f'<span>Bot</span>'
-            f'<span><span class="status-dot {dot_class}"></span>{"🟢 Corriendo" if running else "🔴 Detenido"}</span>'
+            f'<span>{bot_label}</span>'
+            f'<span><span class="status-dot {dot_class}"></span>{bot_status_text}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1708,6 +1725,11 @@ with tabs[6]:
     
     st.markdown("---")
     st.markdown("### 🎛️ Gestión de Portfolio")
+    if MONITOR_ONLY:
+        st.caption(
+            "Modo monitor-only: esta sección aplica al motor legacy. "
+            "Para el monitor, editá `monitor.symbols` en settings.yaml."
+        )
     
     import yaml
     settings_path = ROOT_DIR / "config" / "settings.yaml"
@@ -1759,7 +1781,8 @@ with tabs[6]:
     
     col_rst1, col_rst2, col_rst3 = st.columns([1, 2, 1])
     with col_rst2:
-        if st.button("🔄 Reiniciar Bot con nueva configuración", type="primary", width="stretch"):
+        if st.button("🔄 Reiniciar Bot con nueva configuración", type="primary",
+                     width="stretch", disabled=MONITOR_ONLY):
             if controller.restart_with_config(current_portfolio):
                 st.toast("✅ Bot reiniciado con nueva configuración")
                 time.sleep(2)

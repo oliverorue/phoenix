@@ -1,3 +1,6 @@
+# ── Modo de ejecución ───────────────────────────────────
+# true → solo monitor de señales; NUNCA envía órdenes.
+monitor_only: true
 api:
   circuit_breaker_cooldown_min: 15
   circuit_breaker_max_failures: 5
@@ -24,11 +27,25 @@ execution:
   loop_sleep_position: 30       # 30s con posición abierta
 # ── Paper Trading (OBLIGATORIO probar antes de mainnet) ─
 paper_trading:
-  enabled: true                 # true → PaperExecutor (sin riesgo real)
+  enabled: true                 # LEGACY: ignorado en modo monitor-only
   initial_balance: 50           # tu capital real
   slippage_pct: 0.0005          # 0.05% slippage (XRP es líquido)
   commission_pct: 0.0005        # 0.05% taker fee Binance
   maker_commission_pct: 0.0001  # 0.01% maker fee Binance
+# ── Monitor (SOLO señales; NO ejecuta órdenes) ───────────
+monitor:
+  enabled: true
+  symbols:
+  - XRPUSDT
+  capital_pyg: 100000           # Capital real a monitorear
+  fx_usd_pyg: 7300              # Ajustar al P2P del día (1 USDT ≈ X PYG)
+  risk_per_trade: null          # null → usa el risk_per_trade de la fase
+  max_risk_pct_hard: 0.02       # No sugerir trades que arriesguen > 2%
+  kline_limit: null             # null → mismas velas que el runner live (paridad)
+  use_mainnet_data: true        # Precios públicos Mainnet, sin API keys
+  notify: true                  # Telegram/Discord solo si están configurados
+  session_only: false           # true → no avisar fuera de sesión/día permitido
+  fee_pct: 0.0005               # Taker por lado (ida y vuelta = 2x)
 indicators:
   ma_periods:
   - 5

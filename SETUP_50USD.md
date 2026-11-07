@@ -1,6 +1,10 @@
 # 🏆 Phoenix Bot — Guía Completa para $50 USD en Binance
 
-> **Objetivo:** Hacer rentable tu bot de scalping con **$50 USD** en Binance USDⓈ-M Futures.
+> **Modo actual: monitor-only.** Phoenix ya no ejecuta órdenes: muestra señales
+> para operar manualmente. El comando operativo es `python3 -m bot.monitor`.
+> Las secciones de ejecución paper/live quedan como referencia histórica.
+>
+> **Objetivo:** Evaluar señales de scalping con **$50 USD** en Binance USDⓈ-M Futures.
 > **Lema:** Calidad > Cantidad. Preferimos 1-2 trades perfectos al día que 10 mediocres.
 
 ---
@@ -97,7 +101,7 @@ La Testnet de Binance te da **10,000 USDT virtuales** automáticamente. No neces
 ```bash
 cd /home/oruetrash/dev/trading_bot
 pip install -e .
-python -m bot.main
+python3 -m bot.monitor
 ```
 
 Ve al dashboard: `http://localhost:8502`
@@ -220,7 +224,7 @@ Con $50 NO puedes permitirte errores. Cada trade cuenta.
 python -c "from config.loader import validate_config; validate_config(raise_on_error=True)"
 
 # 2. Iniciar el bot
-python -m bot.main
+python3 -m bot.monitor
 
 # 3. Abrir dashboard
 # Ve a http://localhost:8502
@@ -365,7 +369,7 @@ python scripts/backtest.py --symbol XRPUSDT --capital 50 --start 2026-04-01 --en
 curl http://localhost:8000/metrics 2>/dev/null | grep balance
 
 # Matar el bot
-pkill -f "python -m bot.main"
+pkill -f "python3 -m bot.monitor"
 ```
 
 ---

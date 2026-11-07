@@ -205,6 +205,6 @@ GitHub Actions (`.github/workflows/tests.yml`):
 # Docker
 docker compose up -d
 
-# Directo
-python3 -m bot.main
+# Directo (monitor-only)
+python3 -m bot.monitor
 ```

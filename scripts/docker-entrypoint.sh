@@ -8,8 +8,8 @@ set -e
 mkdir -p /app/data /app/logs
 
 # ── Sintaxis: docker-entrypoint.sh <service>
-#   bot       → Inicia el watchdog (por defecto)
-#   main      → Inicia el bot directamente (sin watchdog)
+#   bot       → Inicia el monitor de señales (por defecto)
+#   main      → Alias del monitor (compatibilidad)
 #   dashboard → Inicia el dashboard Streamlit
 #   test      → Ejecuta los tests
 #   shell     → Bash interactivo
@@ -18,13 +18,9 @@ mkdir -p /app/data /app/logs
 SERVICE="${1:-bot}"
 
 case "$SERVICE" in
-    bot)
-        echo "🔥 Iniciando Watchdog de Phoenix..."
-        exec python /app/bot/watchdog.py
-        ;;
-    main)
-        echo "🔥 Iniciando Phoenix directamente (sin watchdog)..."
-        exec python -m bot.main
+    bot|main)
+        echo "📡 Iniciando Phoenix Signal Monitor (monitor-only)..."
+        exec python -m bot.monitor
         ;;
     dashboard)
         echo "📊 Iniciando Dashboard Streamlit..."

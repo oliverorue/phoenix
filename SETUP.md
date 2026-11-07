@@ -1,5 +1,9 @@
 # 🚀 Instalación y configuración — Phoenix
 
+> **Modo actual: monitor-only.** Phoenix no ejecuta órdenes. El comando
+> operativo es `python3 -m bot.monitor` (o `--once` para una evaluación).
+> El motor de trading paper/live está deshabilitado en este build.
+
 ## Requisitos
 
 - Python 3.10 o superior
@@ -39,7 +43,7 @@ pytest tests/
 
 6. Iniciar el bot:
 
-python -m bot.main
+python3 -m bot.monitor
 
 7. Iniciar el Dashboard
 

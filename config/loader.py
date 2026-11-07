@@ -73,6 +73,7 @@ TESTNET_CONFLICT: bool = (
 )
 
 SYMBOL: str = _settings.get("symbol", "XRPUSDT")
+MONITOR_ONLY: bool = _parse_bool(_settings.get("monitor_only", True))
 TIMEZONE_NAME: str = _settings.get("timezone", "America/Asuncion")
 FASES_ESCALAMIENTO: Dict[int, Dict[str, Any]] = _settings.get("phases", {})
 SUPPORTED_COINS: Dict[str, Dict[str, Any]] = _settings.get("supported_coins", {})
@@ -89,6 +90,9 @@ PAPER_INITIAL_BALANCE: float = float(PAPER_TRADING_CFG.get("initial_balance", 10
 PAPER_SLIPPAGE_PCT: float = float(PAPER_TRADING_CFG.get("slippage_pct", 0.001))
 PAPER_COMMISSION_PCT: float = float(PAPER_TRADING_CFG.get("commission_pct", 0.0005))
 PAPER_MAKER_COMMISSION_PCT: float = float(PAPER_TRADING_CFG.get("maker_commission_pct", 0.0001))
+
+# ── 4a. Monitor de señales (solo lectura, sin ejecución) ──────
+MONITOR_CFG: Dict[str, Any] = _settings.get("monitor", {})
 
 # ── 4a. Portfolio / Correlación ─────────────────────────────
 _PORTFOLIO_CFG: Dict[str, Any] = _settings.get("portfolio", {})

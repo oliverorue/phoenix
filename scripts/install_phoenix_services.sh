@@ -44,7 +44,7 @@ cat > "$APPS_DIR/phoenix-workspace.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Phoenix Workspace
-Comment=Bot, logs y estado del dashboard
+Comment=Monitor de señales, logs y dashboard
 Exec=ptyxis --working-directory="$LINK_DIR" -- bash -lc "exec '$LINK_DIR/scripts/phoenix_workspace.sh'"
 Icon=utilities-terminal
 Terminal=false
@@ -60,7 +60,7 @@ ln -sf "$REPO_DIR/scripts/phoenix_ctl.sh" "$HOME/.local/bin/phoenix"
 
 echo
 echo "✅ Servicios instalados."
-echo "   Bot:       systemctl --user status phoenix-bot"
+echo "   Monitor:   systemctl --user status phoenix-bot"
 echo "   Dashboard: http://127.0.0.1:8502"
 echo "   Workspace: buscá 'Phoenix Workspace' en el menú de aplicaciones"
 echo
