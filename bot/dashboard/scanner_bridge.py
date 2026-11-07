@@ -22,6 +22,7 @@ from loguru import logger
 from bot.execution.manager import TradeManager
 from bot.execution.models import Direction, Trade
 from bot.execution.sizing import plan_trade
+from bot.execution.store import TradeStore
 from bot.scanner.config import ScannerConfig
 from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import ScannerStats, Signal
@@ -43,7 +44,12 @@ class ScannerBridge:
         self.risk = RiskEngine(base_risk_pct=base_risk_pct)
         self.risk.load_history(self.store.load_pnl())
         self.ranker = SignalRanker(self._config)
-        self.trades = TradeManager()
+        self.trade_store = TradeStore()
+        self.trades = TradeManager(
+            store=self.trade_store, on_close=self._on_paper_close,
+        )
+        self.trades.load(self.trade_store)
+        self.risk.load_history(self.trade_store.load_pnl())
         self._scanner = MarketScanner(self._config, on_signal=self.store.save)
         self._scanner.on_price = self.trades.on_price
         self._thread: Optional[threading.Thread] = None
@@ -91,6 +97,10 @@ class ScannerBridge:
             self._scanner.volume_map(),
         )
         return ranked[: limit if limit is not None else self._config.top_n]
+
+    def _on_paper_close(self, trade: Trade) -> None:
+        """Alimenta el Kelly con el PnL de un trade paper cerrado."""
+        self.risk.record_trade(trade.realized_pnl)
 
     def open_paper_trade(
         self, signal: Signal, capital: float,

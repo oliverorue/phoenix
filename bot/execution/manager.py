@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from bot.execution.models import Direction, Fill, Trade, TradeStatus
 from bot.execution.state_machine import advance, direction_sign
@@ -19,12 +19,18 @@ from bot.execution.state_machine import advance, direction_sign
 class TradeManager:
     """Dueño de los trades abiertos/cerrados y del PnL del ciclo."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        store: Optional[object] = None,
+        on_close: Optional[Callable[[Trade], None]] = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._open: dict[str, Trade] = {}
         self._by_symbol: dict[str, list[str]] = {}
         self._closed: deque[Trade] = deque(maxlen=1000)
         self._counter = 0
+        self._store = store
+        self._on_close = on_close
 
     def open_trade(
         self,
@@ -63,6 +69,8 @@ class TradeManager:
             )
             self._open[trade.id] = trade
             self._by_symbol.setdefault(trade.symbol, []).append(trade.id)
+            if self._store is not None:
+                self._store.upsert(trade)
             return trade
 
     def on_price(
@@ -119,6 +127,25 @@ class TradeManager:
         if lst and trade.id in lst:
             lst.remove(trade.id)
         self._closed.append(trade)
+        if self._store is not None:
+            self._store.upsert(trade)
+        if self._on_close is not None:
+            self._on_close(trade)
+
+    def load(self, store: object) -> None:
+        """Recupera trades abiertos y cerrados desde el store (tras reinicio)."""
+        with self._lock:
+            for trade in store.load_open():
+                self._open[trade.id] = trade
+                self._by_symbol.setdefault(trade.symbol, []).append(trade.id)
+            for trade in store.load_closed():
+                self._closed.append(trade)
+            max_id = 0
+            for trade in list(self._open.values()) + list(self._closed):
+                suffix = trade.id[1:] if trade.id.startswith("T") else trade.id
+                if suffix.isdigit():
+                    max_id = max(max_id, int(suffix))
+            self._counter = max_id
 
     def open_trades(self) -> list[Trade]:
         with self._lock:

@@ -8,6 +8,7 @@ es el monto en USDT a arriesgar por operación, no el tamaño del contrato.
 
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from bot.core.kelly_sizing import KellySizing
@@ -28,6 +29,7 @@ class RiskEngine:
         self.base_risk_pct = base_risk_pct
         self.kelly = kelly or KellySizing()
         self.min_confidence_scale = min_confidence_scale
+        self._lock = threading.RLock()
 
     def suggest(self, capital: float, signal: Signal,
                 base_risk_pct: Optional[float] = None) -> Sizing:
@@ -51,7 +53,8 @@ class RiskEngine:
         else:
             eff_base = self.base_risk_pct
 
-        kelly_mult = self.kelly.get_multiplier()
+        with self._lock:
+            kelly_mult = self.kelly.get_multiplier()
         conf_scale = self.min_confidence_scale + (
             1.0 - self.min_confidence_scale
         ) * signal.confidence
@@ -67,9 +70,11 @@ class RiskEngine:
         )
 
     def record_trade(self, pnl_usdt: float) -> None:
-        self.kelly.record_trade(pnl_usdt)
+        with self._lock:
+            self.kelly.record_trade(pnl_usdt)
 
     def load_history(self, pnl_usdts: list[float]) -> None:
         """Reconstruye el estado de Kelly a partir de resultados históricos."""
-        for pnl in pnl_usdts:
-            self.kelly.record_trade(pnl)
+        with self._lock:
+            for pnl in pnl_usdts:
+                self.kelly.record_trade(pnl)
