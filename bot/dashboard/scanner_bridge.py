@@ -142,3 +142,12 @@ class ScannerBridge:
 
     def paper_stats(self) -> dict:
         return self.trades.stats()
+
+    def paper_open_positions(self) -> list[tuple[Trade, float, float]]:
+        """(trade, unrealized_pnl, current_price) de los trades abiertos."""
+        prices = self.trades.last_prices()
+        result: list[tuple[Trade, float, float]] = []
+        for trade in self.trades.open_trades():
+            price = prices.get(trade.symbol, trade.entry_price)
+            result.append((trade, self.trades.unrealized_pnl(trade), price))
+        return result

@@ -138,3 +138,18 @@ class TestManager:
     def test_close_manual_unknown_id_returns_none(self):
         mgr = TradeManager()
         assert mgr.close_manual("noexiste", 1.0) is None
+
+
+class TestUnrealized:
+    def test_long_unrealized_pnl_and_last_price(self):
+        mgr = TradeManager()
+        trade = mgr.open_trade("XRPUSDT", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        mgr.on_price("XRPUSDT", 100.5, ts=1.0)
+        assert mgr.last_prices()["XRPUSDT"] == pytest.approx(100.5)
+        assert mgr.unrealized_pnl(trade) == pytest.approx(5.0)
+
+    def test_short_unrealized_pnl(self):
+        mgr = TradeManager()
+        trade = mgr.open_trade("XRPUSDT", "SHORT", 100.0, 101.0, 99.0, 98.0, 10.0, ts=0.0)
+        mgr.on_price("XRPUSDT", 99.5, ts=1.0)
+        assert mgr.unrealized_pnl(trade) == pytest.approx(5.0)

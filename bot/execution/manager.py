@@ -31,6 +31,7 @@ class TradeManager:
         self._counter = 0
         self._store = store
         self._on_close = on_close
+        self._last_price: dict[str, float] = {}
 
     def open_trade(
         self,
@@ -84,6 +85,7 @@ class TradeManager:
         sym = symbol.upper()
         fills: list[Fill] = []
         with self._lock:
+            self._last_price[sym] = price
             for tid in list(self._by_symbol.get(sym, [])):
                 trade = self._open.get(tid)
                 if trade is None:
@@ -158,6 +160,17 @@ class TradeManager:
     def get_trade(self, trade_id: str) -> Optional[Trade]:
         with self._lock:
             return self._open.get(trade_id)
+
+    def last_prices(self) -> dict[str, float]:
+        with self._lock:
+            return dict(self._last_price)
+
+    def unrealized_pnl(self, trade: Trade) -> float:
+        """PnL latente del trade abierto al último precio conocido."""
+        with self._lock:
+            price = self._last_price.get(trade.symbol, trade.entry_price)
+        sign = direction_sign(trade.direction)
+        return (price - trade.entry_price) * trade.remaining_qty * sign
 
     def stats(self) -> dict:
         """Métricas agregadas sobre los trades cerrados."""

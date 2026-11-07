@@ -117,22 +117,26 @@ def _render_history(st_module: Any, bridge: ScannerBridge) -> None:
 
 
 def _render_paper(st_module: Any, bridge: ScannerBridge) -> None:
-    """Panel de trades paper (dry-run): abiertos, cerrados y métricas."""
+    """Panel de trades paper (dry-run): abiertos con PnL latente, cerrados y métricas."""
     s = bridge.paper_stats()
-    c1, c2, c3, c4 = st_module.columns(4)
-    c1.metric("Cerrados", s["total"])
-    c2.metric("Wins", s["wins"])
-    c3.metric("Losses", s["losses"])
-    c4.metric("PnL (paper)", f"${s['pnl']:+.2f}")
+    open_pos = bridge.paper_open_positions()
+    unrealized = sum(upnl for _t, upnl, _p in open_pos)
 
-    open_trades = bridge.paper_open_trades()
-    if open_trades:
+    c1, c2, c3, c4, c5 = st_module.columns(5)
+    c1.metric("Cerrados", s["total"])
+    c2.metric("Win rate", f"{s['win_rate'] * 100:.0f}%")
+    c3.metric("Wins / Losses", f"{s['wins']} / {s['losses']}")
+    c4.metric("PnL realizado", f"${s['pnl']:+.2f}")
+    c5.metric("PnL latente", f"${unrealized:+.2f}")
+
+    if open_pos:
         st_module.markdown("**Abiertos**")
-        for t in open_trades:
+        for t, upnl, price in open_pos:
+            dist_sl = abs(price - t.sl_price) / price * 100 if price else 0.0
             st_module.markdown(
-                f"- `{t.id}` {t.symbol} {t.direction.value} · entry {t.entry_price} · "
-                f"SL {t.sl_price} · TP1 {t.tp1_price} · TP2 {t.tp2_price} · "
-                f"qty {t.qty:g} · {t.status.value}"
+                f"- `{t.id}` {t.symbol} {t.direction.value} · precio {price} · "
+                f"entry {t.entry_price} · SL {t.sl_price} ({dist_sl:.2f}%) · "
+                f"uPnL {upnl:+.2f} USDT · {t.status.value}"
             )
     else:
         st_module.caption("Sin trades abiertos.")
