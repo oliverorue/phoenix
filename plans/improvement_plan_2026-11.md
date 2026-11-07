@@ -732,4 +732,19 @@ Si no se respeta ese orden, cualquier resultado —paper, backtest u optimizaci�
 - [x] Si hay posición sin SL conocido, se cierra por seguridad.
 - [x] Tests de fills, TP parcial, cierre remanente, trailing, shutdown y recuperación.
 
-**Siguiente:** Fase 4 — paridad de paper trading (SL/TP2/parciales/trailing simulados).
+### Fase 4 — Completada (2026-11-07)
+
+- [x] `PaperExecutor.update_position()` simula SL, TP1 y TP2 en cada ciclo.
+- [x] TP1 cierra el porcentaje configurado y reduce la cantidad remanente.
+- [x] TP2 cierra el remanente completo.
+- [x] SL tiene prioridad conservadora sobre TP en el mismo tick.
+- [x] Slippage en market/SL y fills limit en TPs.
+- [x] Fees separados: taker para market/SL, maker para TPs.
+- [x] Apalancamiento influye en el margen requerido.
+- [x] Trailing stop mueve el SL y puede ejecutar el cierre en paper.
+- [x] Equity mark-to-market e historial por ciclo.
+- [x] `TradeJournal` suma PnL parcial y descuenta comisiones totales.
+- [x] La reconciliación de exchange se salta en paper.
+- [x] Tests de TP parcial, TP2, SL con slippage, trailing, equity y journal parcial.
+
+**Siguiente:** Fase 5 — corregir el backtester (paginación, ventana 1h, vela de entrada, TP parcial, score).

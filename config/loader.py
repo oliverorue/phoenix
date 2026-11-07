@@ -88,6 +88,7 @@ PAPER_TRADING_ENABLED: bool = PAPER_TRADING_CFG.get("enabled", False)
 PAPER_INITIAL_BALANCE: float = float(PAPER_TRADING_CFG.get("initial_balance", 10000.0))
 PAPER_SLIPPAGE_PCT: float = float(PAPER_TRADING_CFG.get("slippage_pct", 0.001))
 PAPER_COMMISSION_PCT: float = float(PAPER_TRADING_CFG.get("commission_pct", 0.0005))
+PAPER_MAKER_COMMISSION_PCT: float = float(PAPER_TRADING_CFG.get("maker_commission_pct", 0.0001))
 
 # ── 4a. Portfolio / Correlación ─────────────────────────────
 _PORTFOLIO_CFG: Dict[str, Any] = _settings.get("portfolio", {})

@@ -27,7 +27,8 @@ paper_trading:
   enabled: true                 # true → PaperExecutor (sin riesgo real)
   initial_balance: 50           # tu capital real
   slippage_pct: 0.0005          # 0.05% slippage (XRP es líquido)
-  commission_pct: 0.00055       # 0.055% taker fee Binance
+  commission_pct: 0.0005        # 0.05% taker fee Binance
+  maker_commission_pct: 0.0001  # 0.01% maker fee Binance
 indicators:
   ma_periods:
   - 5

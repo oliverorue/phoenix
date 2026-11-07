@@ -173,3 +173,38 @@ class TestTradeJournalCSVWrites:
         assert os.path.exists(journal_path)
         j.open('XRPUSDT', 'LONG', 0.50, 100, 0.49, 0.51, 0.53)
         assert j._open_trade['symbol'] == 'XRPUSDT'
+
+class TestTradeJournalPartialPnL:
+    """El journal debe sumar parciales y descontar comisiones."""
+
+    def test_partial_tp1_tp2_pnl_net(self, tmp_path):
+        journal_path = tmp_path / "partial.csv"
+        j = TradeJournal(journal_file=str(journal_path))
+        j.open(
+            symbol="XRPUSDT", side="LONG", entry_price=1.0,
+            qty=100.0, sl=0.95, tp1=1.05, tp2=1.10,
+        )
+
+        # Simular TP1 parcial (65) y comisiones acumuladas.
+        j._open_trade["qty"] = 35.0
+        j._open_trade["realized_pnl_gross"] = (1.05 - 1.0) * 65
+        j._open_trade["commission_usdt"] = (
+            100 * 1.0 * 0.0005 + 65 * 1.05 * 0.0001 + 35 * 1.10 * 0.0001
+        )
+        j._open_trade["tp1_hit"] = True
+        j._open_trade["tp2_hit"] = True
+
+        j.close(exit_price=1.10, close_reason="tp2", sl_final=1.04)
+
+        with open(journal_path, "r") as f:
+            row = next(csv.DictReader(f))
+
+        expected = (
+            (1.05 - 1.0) * 65
+            + (1.10 - 1.0) * 35
+            - (100 * 1.0 * 0.0005 + 65 * 1.05 * 0.0001 + 35 * 1.10 * 0.0001)
+        )
+        assert float(row["qty"]) == pytest.approx(100.0)
+        assert float(row["pnl_usdt"]) == pytest.approx(expected, abs=1e-3)
+        assert row["tp1_hit"] == "YES"
+        assert row["tp2_hit"] == "YES"

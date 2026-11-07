@@ -79,6 +79,16 @@ class PositionManager:
                 self._reset_position_state()
                 return None
 
+        # Paper trading: simular SL/TP1/TP2 con el precio actual.
+        checker = getattr(self.executor, "update_position", None)
+        if callable(checker):
+            action = checker(current_price)
+            if inspect.isawaitable(action):
+                action = await action
+            if not self.executor.position_open:
+                self._reset_position_state()
+                return f"close_{action}" if action else None
+
         # Obtener indicadores para detectar patrones
         ind_15m = self.indicators.calc_15m_indicators(df_15m)
         ind_1h = self.indicators.calc_1h_indicators(df_1h)

@@ -511,11 +511,12 @@ class OrderExecutor:
 
     @trace(attributes={"component": "OrderExecutor"})
     @api_retry(max_retries=2, base_delay=0.5, critical=True)
-    def close_position(self, reason: str = "manual_close") -> None:
+    def close_position(self, reason: Optional[str] = None) -> None:
         """Cierra posición a mercado (SINCRONO — legacy compat)."""
         if not self.position_open:
             return
-        self._pending_close_reason = reason
+        if reason is not None:
+            self._pending_close_reason = reason
         import asyncio as _asyncio
         try:
             loop = _asyncio.get_event_loop()

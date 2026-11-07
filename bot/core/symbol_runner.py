@@ -1,3 +1,4 @@
+import inspect
 import time
 from typing import Any
 from loguru import logger
@@ -157,6 +158,12 @@ class SymbolRunner:
             current_price = df_15m["close"].iloc[-1]
             # Cachear último precio en executor para close_position() (sync safe)
             self.executor.last_price = current_price
+            # Paper: registrar equity mark-to-market.
+            equity_update = getattr(self.executor, "update_equity", None)
+            if callable(equity_update):
+                result = equity_update(current_price)
+                if inspect.isawaitable(result):
+                    await result
             # Actualizar balance para tracking de drawdown
             await self.risk_mgr.update_balance_for_drawdown(self.balance)
             if self.database:

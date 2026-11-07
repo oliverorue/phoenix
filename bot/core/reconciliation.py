@@ -77,6 +77,9 @@ class OrderReconciler:
     async def _reconcile_symbol(self, runner: Any) -> None:
         """Reconcilia un único símbolo contra el exchange."""
         sym = runner.symbol
+        # Paper trading no tiene órdenes ni posiciones en el exchange.
+        if getattr(runner.executor, "balance_scope", None) == "allocated":
+            return
         client = runner.executor._ensure_client()  # BinanceFuturesClient
 
         # ── 1. Obtener órdenes abiertas del exchange ────────

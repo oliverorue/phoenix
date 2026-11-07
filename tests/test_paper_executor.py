@@ -575,3 +575,120 @@ def _make_df(close_val: float = 0.50, n_rows: int = 50):
         "close": closes,
         "volume": np.random.uniform(1000, 5000, n_rows),
     })
+
+
+class TestPhase4PaperParity:
+    """SL, TP1/TP2 y trailing simulados con fees maker/taker."""
+
+    @pytest.fixture
+    def ex(self, mock_data_feed):
+        return PaperExecutor(
+            data_feed=mock_data_feed,
+            initial_balance=1000.0,
+            slippage_pct=0.0,
+            commission_pct=0.0005,
+            maker_commission_pct=0.0001,
+        )
+
+    @pytest.mark.asyncio
+    async def test_tp1_partial_then_tp2_closes_remaining(self, ex):
+        ok = await ex.open_position(
+            "LONG", 1.0, 0.95, 1.05, 1.10, 100.0,
+            qty_tp1=65.0, qty_tp2=35.0,
+        )
+        assert ok is True
+
+        assert ex.update_position(1.05) == "tp1"
+        assert ex.tp1_hit is True
+        assert ex.quantity == pytest.approx(35.0)
+        assert ex.position_open is True
+
+        assert ex.update_position(1.10) == "tp2"
+        assert ex.position_open is False
+        assert ex.total_trades == 1
+        assert ex.wins == 1
+
+        expected_pnl = (
+            (1.05 - 1.0) * 65 - 65 * 1.05 * 0.0001
+            + (1.10 - 1.0) * 35 - 35 * 1.10 * 0.0001
+        )
+        assert ex.total_pnl == pytest.approx(expected_pnl, rel=1e-6)
+        assert ex.last_close_pnl == pytest.approx(expected_pnl, rel=1e-6)
+        assert ex.total_commission == pytest.approx(
+            100 * 1.0 * 0.0005 + 65 * 1.05 * 0.0001 + 35 * 1.10 * 0.0001,
+            rel=1e-6,
+        )
+
+    @pytest.mark.asyncio
+    async def test_sl_closes_at_stop_with_slippage(self, ex):
+        ex.slippage_pct = 0.001
+        await ex.open_position(
+            "LONG", 1.0, 0.95, 1.05, 1.10, 100.0,
+            qty_tp1=65.0, qty_tp2=35.0,
+        )
+
+        assert ex.update_position(0.94) == "stop_loss"
+        assert ex.position_open is False
+        assert ex.losses == 1
+        assert ex.last_close_reason == "stop_loss"
+        assert ex.last_close_pnl < 0
+
+    @pytest.mark.asyncio
+    async def test_short_tp1_partial(self, ex):
+        await ex.open_position(
+            "SHORT", 1.0, 1.05, 0.95, 0.90, 100.0,
+            qty_tp1=65.0, qty_tp2=35.0,
+        )
+
+        assert ex.update_position(0.95) == "tp1"
+        assert ex.tp1_hit is True
+        assert ex.quantity == pytest.approx(35.0)
+        assert ex.position_open is True
+
+    @pytest.mark.asyncio
+    async def test_trailing_sl_can_close_paper_position(self, ex):
+        await ex.open_position(
+            "LONG", 1.0, 0.95, 1.05, 1.10, 100.0,
+            qty_tp1=65.0, qty_tp2=35.0,
+        )
+        ex.update_position(1.05)  # TP1
+        ex.update_stop_loss(1.04)  # trailing
+
+        assert ex.update_position(1.03) == "stop_loss"
+        assert ex.position_open is False
+        assert ex.last_close_reason == "stop_loss"
+        assert ex.quantity == 0.0
+
+    @pytest.mark.asyncio
+    async def test_equity_history_updates(self, ex):
+        await ex.open_position(
+            "LONG", 1.0, 0.95, 1.05, 1.10, 100.0,
+            qty_tp1=65.0, qty_tp2=35.0,
+        )
+        before = ex.update_equity(1.02)
+        assert before > 0
+        assert len(ex.equity_history) >= 2  # open + mark
+        assert ex.stats["current_equity"] > 0
+
+    @pytest.mark.asyncio
+    async def test_mark_close_reason_is_preserved(self, ex):
+        await ex.open_position(
+            "LONG", 1.0, 0.95, 1.05, 1.10, 100.0,
+            qty_tp1=65.0, qty_tp2=35.0,
+        )
+        ex.last_price = 1.0
+        ex.mark_close_reason("close_reversal")
+        ex.close_position()
+        assert ex.last_close_reason == "close_reversal"
+
+
+class TestPhase4Reconciliation:
+    @pytest.mark.asyncio
+    async def test_reconciler_skips_paper_executor(self, mock_data_feed):
+        from types import SimpleNamespace
+        from bot.core.reconciliation import OrderReconciler
+
+        ex = PaperExecutor(data_feed=mock_data_feed, initial_balance=100.0)
+        runner = SimpleNamespace(symbol="XRPUSDT", executor=ex)
+        # No debe intentar _ensure_client (PaperExecutor no lo tiene).
+        await OrderReconciler(interval_cycles=1).reconcile_all([runner])

@@ -47,6 +47,8 @@ class TradeJournal:
             "entry_time": datetime.now(timezone.utc).isoformat(),
             "entry_price": entry_price,
             "qty": qty,
+            "initial_qty": qty,
+            "realized_pnl_gross": 0.0,
             "sl_initial": sl,
             "tp1": tp1,
             "tp2": tp2,
@@ -86,17 +88,23 @@ class TradeJournal:
         if not self._open_trade:
             return
         entry = self._open_trade["entry_price"]
-        qty = self._open_trade["qty"]
+        qty = self._open_trade["qty"]  # cantidad remanente
+        initial_qty = self._open_trade.get("initial_qty", qty)
         side = self._open_trade["side"]
         entry_time = self._open_trade["entry_time"]
         exit_time = datetime.now(timezone.utc).isoformat()
 
         if side == "LONG":
-            pnl_usdt = (exit_price - entry) * qty
-            pnl_pct = (exit_price - entry) / entry * 100
+            remaining_pnl = (exit_price - entry) * qty
         else:
-            pnl_usdt = (entry - exit_price) * qty
-            pnl_pct = (entry - exit_price) / entry * 100
+            remaining_pnl = (entry - exit_price) * qty
+
+        # PnL total = parciales ya realizados + remanente - comisiones.
+        realized_gross = float(self._open_trade.get("realized_pnl_gross", 0.0))
+        commission_total = float(self._open_trade.get("commission_usdt", 0.0))
+        pnl_usdt = remaining_pnl + realized_gross - commission_total
+        notional = entry * initial_qty
+        pnl_pct = (pnl_usdt / notional * 100) if notional else 0.0
 
         # ── Notificar a KellySizing ──
         if self._kelly_sizing is not None:
@@ -122,7 +130,7 @@ class TradeJournal:
                 exit_time,
                 entry,
                 exit_price,
-                qty,
+                initial_qty,
                 round(pnl_usdt, 4),
                 round(pnl_pct, 4),
                 self._open_trade["sl_initial"],
@@ -151,7 +159,7 @@ class TradeJournal:
                 "entry_time": self._open_trade.get("entry_time", ""),
                 "exit_price": exit_price,
                 "exit_time": exit_time,
-                "qty": float(self._open_trade.get("qty", 0)),
+                "qty": float(self._open_trade.get("initial_qty", self._open_trade.get("qty", 0))),
                 "pnl_usdt": round(pnl_usdt, 4),
                 "pnl_pct": round(pnl_pct, 4),
                 "sl_initial": float(self._open_trade.get("sl_initial", 0)),

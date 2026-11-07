@@ -9,7 +9,10 @@ import yaml
 from pathlib import Path
 
 from config.loader import SYMBOL, TESTNET, WS_ENABLED
-from config.loader import PAPER_TRADING_ENABLED, PAPER_INITIAL_BALANCE, PAPER_SLIPPAGE_PCT, PAPER_COMMISSION_PCT
+from config.loader import (
+    PAPER_TRADING_ENABLED, PAPER_INITIAL_BALANCE, PAPER_SLIPPAGE_PCT,
+    PAPER_COMMISSION_PCT, PAPER_MAKER_COMMISSION_PCT,
+)
 from bot.core.data_feed import DataFeed
 from bot.core.trade_journal import TradeJournal
 from bot.core.notifier import Notifier
@@ -204,6 +207,7 @@ class TradingBot:
                     initial_balance=total_balance * cfg["allocation_pct"],
                     slippage_pct=PAPER_SLIPPAGE_PCT,
                     commission_pct=PAPER_COMMISSION_PCT,
+                    maker_commission_pct=PAPER_MAKER_COMMISSION_PCT,
                 )
             else:
                 paper_exec = None
