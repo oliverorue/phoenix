@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from typing import Optional
 
 from loguru import logger
@@ -21,6 +22,7 @@ from loguru import logger
 from bot.scanner.config import ScannerConfig
 from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import ScannerStats, Signal
+from bot.scanner.ranker import RankedSignal, SignalRanker
 from bot.scanner.risk_engine import RiskEngine
 from bot.scanner.store import SignalStore
 
@@ -37,6 +39,7 @@ class ScannerBridge:
         self.store = SignalStore()
         self.risk = RiskEngine(base_risk_pct=base_risk_pct)
         self.risk.load_history(self.store.load_pnl())
+        self.ranker = SignalRanker(self._config)
         self._scanner = MarketScanner(self._config, on_signal=self.store.save)
         self._thread: Optional[threading.Thread] = None
 
@@ -69,3 +72,17 @@ class ScannerBridge:
             self._scanner.stats(),
             self._scanner.tracked_symbols(),
         )
+
+    def top_signals(
+        self,
+        now: Optional[float] = None,
+        limit: Optional[int] = None,
+    ) -> list[RankedSignal]:
+        """Señales rankeadas (mejores primero), recortadas a ``limit``."""
+        now = now if now is not None else time.time()
+        ranked = self.ranker.rank(
+            self._scanner.signals_snapshot(),
+            now,
+            self._scanner.volume_map(),
+        )
+        return ranked[: limit if limit is not None else self._config.top_n]

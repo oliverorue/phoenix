@@ -50,6 +50,16 @@ class ScannerConfig(BaseModel):
     liq_cascade_min_events: int = 3        # nº mínimo de forced-orders
     liq_cascade_min_notional: float = 2_000_000.0  # nocional mínimo liquidado
 
+    # ── Calidad y ranking de señales ─────────────────────
+    min_confidence: float = 0.40           # piso de confianza para emitir
+    min_reasons: int = 2                   # nº mínimo de motivos alineados
+    top_n: int = 3                         # cuántas señales mostrar (mejores)
+    w_confidence: float = 0.50             # pesos del score compuesto
+    w_reasons: float = 0.25
+    w_liquidity: float = 0.15
+    w_freshness: float = 0.10
+    freshness_halflife_seconds: int = 300  # la señal se "enfría" en ~5 min
+
     @classmethod
     def from_settings(cls, overrides: Optional[dict[str, Any]] = None) -> "ScannerConfig":
         """Construye la config desde `settings.yaml` (sección `scanner`)."""

@@ -357,6 +357,10 @@ class MarketScanner:
     def tracked_symbols(self) -> list[str]:
         return sorted(self._tracked)
 
+    def volume_map(self) -> dict[str, float]:
+        """Volumen 24h por símbolo (para el ranking por liquidez)."""
+        return {p.symbol: p.quote_volume_24h for p in self._universe}
+
     def stats(self) -> ScannerStats:
         with self._lock:
             return ScannerStats(

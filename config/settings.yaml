@@ -64,6 +64,14 @@ scanner:
   funding_extreme: 0.0003
   liq_cascade_min_events: 3
   liq_cascade_min_notional: 2000000
+  min_confidence: 0.4
+  min_reasons: 2
+  top_n: 3
+  w_confidence: 0.5
+  w_reasons: 0.25
+  w_liquidity: 0.15
+  w_freshness: 0.1
+  freshness_halflife_seconds: 300
 indicators:
   ma_periods:
   - 5

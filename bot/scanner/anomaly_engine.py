@@ -209,11 +209,13 @@ class AnomalyEngine:
             return None
 
         norm = score / weight  # en [-1, 1]
-        if abs(norm) < 0.35:
-            return None  # ruido, no emitir
+        confidence = min(0.95, abs(norm))
+
+        # Piso de calidad: confianza mínima y motivos alineados.
+        if confidence < self._cfg.min_confidence or len(reasons) < self._cfg.min_reasons:
+            return None
 
         direction: Direction = "LONG" if norm > 0 else "SHORT"
-        confidence = min(0.95, abs(norm))
 
         return Signal(
             symbol=symbol,

@@ -1,13 +1,9 @@
 """
-Página del Radar para el dashboard Streamlit — "idiot-proof".
+Página del Radar para el dashboard Streamlit — limpia e interactiva.
 
-Conecta el scanner asincrónico (vía :mod:`bot.dashboard.scanner_bridge`) con
-tarjetas gigantes LONG/SHORT, el dimensionamiento Kelly y una ruta operativa
-para operar manualmente.
-
-Para integrarlo en ``app.py``:
-    from bot.dashboard.scanner_page import render_scanner_page
-    render_scanner_page(st)
+Muestra solo las mejores N señales (ranking por confianza, confluencia,
+liquidez y frescura), con tarjetas grandes LONG/SHORT, dimensionamiento
+Kelly y una ruta operativa. Se actualiza sola vía ``st.fragment``.
 """
 
 from __future__ import annotations
@@ -18,16 +14,32 @@ import streamlit as st
 
 from bot.dashboard.scanner_bridge import ScannerBridge
 from bot.scanner.models import Signal
+from bot.scanner.ranker import RankedSignal
 
 _RUTA = [
-    ("🎯", "Esperá una tarjeta LONG/SHORT con confianza ≥ 60% y 2+ motivos alineados."),
-    ("📉", "Revisá la tendencia 1h: si va en contra de la dirección, descartá la señal."),
-    ("🕯️", "Confirmá en la vela 15m que no estás comprando/vendiendo justo en el pico."),
-    ("📐", "Tomá el «USDT a arriesgar» del dashboard y calculá cantidad = riesgo ÷ distancia al SL."),
-    ("🛒", "Entrá con orden límite (menos fees que market) y colocá el SL apenas se llene."),
-    ("🏁", "TP1 parcial (50–65%), mové SL a breakeven, dejá correr el resto al TP2."),
-    ("📓", "Anotá el trade en el journal. Nunca arriesgues más del 1–2% por operación."),
+    ("🎯", "Esperá una tarjeta LONG/SHORT con score alto y 2+ motivos alineados."),
+    ("📉", "Revisá la tendencia 1h: si va en contra de la dirección, descartá."),
+    ("🕯️", "Confirmá en la vela 15m que no estás entrando justo en el pico."),
+    ("📐", "Tomá el «USDT a arriesgar» y calculá cantidad = riesgo ÷ distancia al SL."),
+    ("🛒", "Entrá con orden límite (menos fees) y colocá el SL apenas llene."),
+    ("🏁", "TP1 parcial (50–65%), mové SL a breakeven, dejá correr el resto."),
+    ("📓", "Anotá el trade en el historial. Nunca más del 1–2% por operación."),
 ]
+
+_CSS = """
+<style>
+.block-container { padding-top: 1.2rem; }
+h1 { letter-spacing: -0.5px; }
+div[data-testid="stMetric"] { background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 0.6rem 0.8rem; }
+.signal-card { border-radius: 16px; padding: 18px 20px; margin: 12px 0;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35); color: #fff; }
+.score-badge { background: rgba(0,0,0,0.28); border-radius: 999px;
+  padding: 2px 10px; font-weight: 700; font-size: 0.85rem; }
+.conf-bar { background: rgba(0,0,0,0.25); border-radius: 999px; height: 8px; margin: 10px 0 4px; }
+.conf-fill { background: #fff; border-radius: 999px; height: 8px; }
+</style>
+"""
 
 
 @st.cache_resource
@@ -48,21 +60,27 @@ def _in_streamlit() -> bool:
         return False
 
 
-def _card_html(sig: Signal, risk_usdt: float, risk_pct: float,
-               kelly: float) -> str:
+def _card_html(ranked: RankedSignal, rank: int, risk_usdt: float,
+               risk_pct: float, kelly: float) -> str:
+    sig = ranked.signal
     bg = "#16a34a" if sig.direction == "LONG" else "#dc2626"
     arrow = "▲ LONG" if sig.direction == "LONG" else "▼ SHORT"
     reasons = " · ".join(sig.reasons)
+    conf_pct = sig.confidence * 100
+    b = ranked.breakdown
     return (
-        f'<div style="background:{bg};color:#fff;border-radius:18px;'
-        f'padding:22px;margin:14px 0;box-shadow:0 8px 24px rgba(0,0,0,.25)">'
-        f'<h2 style="margin:0 0 6px;font-size:1.9rem">{arrow} — {sig.symbol}</h2>'
+        f'<div class="signal-card" style="background:{bg}">'
+        f'<h2 style="margin:0 0 4px;font-size:1.7rem">#{rank} {arrow} — {sig.symbol} '
+        f'<span class="score-badge">score {ranked.score:.2f}</span></h2>'
         f'<div style="font-size:1.05rem;opacity:.95">{reasons}</div>'
-        f'<div style="margin-top:10px;font-size:1.1rem">Precio: <b>{sig.price}</b>'
-        f' &nbsp;·&nbsp; Confianza: <b>{sig.confidence * 100:.0f}%</b></div>'
-        f'<h3 style="margin:14px 0 0;font-size:1.6rem">Arriesgar: '
-        f'${risk_usdt:,.2f} USDT</h3>'
+        f'<div style="margin-top:8px;font-size:1.05rem">Precio: <b>{sig.price}</b>'
+        f' &nbsp;·&nbsp; Confianza: <b>{conf_pct:.0f}%</b></div>'
+        f'<div class="conf-bar"><div class="conf-fill" style="width:{conf_pct:.0f}%"></div></div>'
+        f'<h3 style="margin:10px 0 0;font-size:1.5rem">Arriesgar: ${risk_usdt:,.2f} USDT</h3>'
         f'<div style="opacity:.85">{risk_pct:.3f}% del capital · Kelly ×{kelly}</div>'
+        f'<div style="opacity:.7;font-size:.85rem;margin-top:6px">'
+        f'motivos {b.get("motivos", 0):.2f} · liquidez {b.get("liquidez", 0):.0%} · '
+        f'frescura {b.get("frescura", 0):.0%}</div>'
         f'</div>'
     )
 
@@ -100,10 +118,10 @@ def _render_history(st_module: Any, bridge: ScannerBridge) -> None:
 
 def render_scanner_page(st_module: Any = st) -> None:
     """Renderiza el radar completo. Importar en ``app.py``."""
+    st_module.markdown(_CSS, unsafe_allow_html=True)
     st_module.title("📡 Radar Global — Binance USDⓈ-M Futures")
     st_module.caption("Monitor-only: muestra anomalías, no ejecuta órdenes.")
 
-    # No arrancar el hilo del scanner en import/tests (bare mode).
     if not _in_streamlit():
         st_module.info(
             "Radar disponible al ejecutar `streamlit run bot/dashboard/app.py`."
@@ -112,64 +130,71 @@ def render_scanner_page(st_module: Any = st) -> None:
 
     bridge = _get_bridge()
 
-    col_cap, col_risk = st_module.columns(2)
-    with col_cap:
+    # ── Controles ───────────────────────────────────────
+    c_cap, c_risk, c_n, c_conf = st_module.columns(4)
+    with c_cap:
         capital = st_module.number_input(
-            "💵 Capital base (USDT)", min_value=10.0, value=500.0, step=10.0,
+            "💵 Capital (USDT)", min_value=10.0, value=500.0, step=10.0,
         )
-    with col_risk:
+    with c_risk:
         base_risk_pct = st_module.number_input(
-            "🎚️ Riesgo base por trade (%)", min_value=0.1, max_value=3.0,
+            "🎚️ Riesgo/trade (%)", min_value=0.1, max_value=3.0,
             value=1.0, step=0.1,
         ) / 100.0
+    with c_n:
+        top_n = st_module.slider("Nº señales", 1, 10, 3)
+    with c_conf:
+        min_conf = st_module.slider("Confianza mínima", 0, 90, 40, step=5) / 100.0
 
-    signals, stats, _tracked = bridge.snapshot()
+    # ── Métricas ────────────────────────────────────────
+    _signals, stats, _tracked = bridge.snapshot()
+    m1, m2, m3, m4 = st_module.columns(4)
+    m1.metric("Pares rastreados", stats.tracked)
+    m2.metric("Señales en buffer", stats.signals_emitted)
+    m3.metric("Eventos", f"{stats.events_processed:,}")
+    m4.metric("Reconexiones", stats.reconnects)
 
-    c1, c2, c3, c4 = st_module.columns(4)
-    c1.metric("Pares rastreados", stats.tracked)
-    c2.metric("Señales emitidas", stats.signals_emitted)
-    c3.metric("Eventos", f"{stats.events_processed:,}")
-    c4.metric("Reconexiones", stats.reconnects)
-
-    d = stats.diagnostics
-    st_module.markdown(
-        f"🔍 Diagnóstico — evals `{d.get('evals', 0)}` · agg `{d.get('agg', 0)}` · "
-        f"depth `{d.get('depth', 0)}` · funding `{d.get('funding', 0)}` · force `{d.get('force', 0)}`"
-    )
-    st_module.markdown(
-        f"🎯 Hits — OBI `{d.get('obi_hits', 0)}` · delta `{d.get('delta_hits', 0)}` · "
-        f"spike `{d.get('spike_hits', 0)}` · funding `{d.get('funding_hits', 0)}` · "
-        f"cascade `{d.get('cascade_hits', 0)}`"
-    )
-    sc = stats.stream_counts
-    if sc:
+    with st_module.expander("🔍 Diagnóstico técnico", expanded=False):
+        d = stats.diagnostics
         st_module.markdown(
-            "📊 Streams — " + " · ".join(f"`{k}` {v}" for k, v in sorted(sc.items()))
+            f"evals `{d.get('evals', 0)}` · agg `{d.get('agg', 0)}` · "
+            f"depth `{d.get('depth', 0)}` · funding `{d.get('funding', 0)}` · "
+            f"force `{d.get('force', 0)}`"
         )
-
-    if stats.last_error:
-        st_module.warning(f"Último error: {stats.last_error}")
-    if not bridge.is_running():
-        st_module.error("El scanner no está corriendo.")
-    if st_module.button("🔄 Reiniciar radar"):
-        _get_bridge.clear()
-        st_module.rerun()
+        st_module.markdown(
+            f"hits — OBI `{d.get('obi_hits', 0)}` · delta `{d.get('delta_hits', 0)}` · "
+            f"spike `{d.get('spike_hits', 0)}` · funding `{d.get('funding_hits', 0)}` · "
+            f"cascade `{d.get('cascade_hits', 0)}`"
+        )
+        sc = stats.stream_counts
+        if sc:
+            st_module.markdown(
+                "streams — " + " · ".join(f"`{k}` {v}" for k, v in sorted(sc.items()))
+            )
+        if stats.last_error:
+            st_module.warning(f"Último error: {stats.last_error}")
+        if not bridge.is_running():
+            st_module.error("El scanner no está corriendo.")
+        if st_module.button("🔄 Reiniciar radar"):
+            _get_bridge.clear()
+            st_module.rerun()
 
     st_module.markdown("---")
-    st_module.markdown("### 🚨 Señales")
+    st_module.markdown("### 🚨 Mejores señales")
 
-    if not signals:
-        st_module.info("Esperando anomalías en el mercado…")
+    ranked = bridge.top_signals(limit=max(top_n, 10))
+    ranked = [r for r in ranked if r.signal.confidence >= min_conf][:top_n]
+
+    if not ranked:
+        st_module.info("Sin señales que cumplan los filtros. Ajustá confianza o esperá.")
     else:
-        for sig in reversed(signals[-20:]):
+        for i, r in enumerate(ranked, start=1):
             sizing = bridge.risk.suggest(
-                capital, sig, base_risk_pct=base_risk_pct,
+                capital, r.signal, base_risk_pct=base_risk_pct,
             )
             st_module.markdown(
-                _card_html(
-                    sig, sizing.risk_usdt, sizing.risk_pct,
-                    sizing.kelly_multiplier,
-                ),
+                _card_html(r, i, sizing.risk_usdt, sizing.risk_pct,
+                           sizing.kelly_multiplier),
                 unsafe_allow_html=True,
             )
 
@@ -186,9 +211,10 @@ def render_scanner_page(st_module: Any = st) -> None:
 
     with st_module.expander("🔧 Qué se puede cambiar", expanded=False):
         st_module.markdown(
-            "- **Capital / riesgo base**: acá arriba.\n"
-            "- **Umbrales de anomalías** (OBI, z-score, funding, liquidaciones): "
-            "`config/settings.yaml` → `scanner`.\n"
-            "- **Filtro de basura**: `min_quote_volume_24h` y `max_symbols` en esa sección.\n"
-            "- **Niveles de book**: `depth_levels` (5/10/20) y `depth_symbols_limit`."
+            "- **Capital / riesgo / nº de señales / confianza mínima**: acá arriba.\n"
+            "- **Pesos del ranking** (`w_confidence`, `w_reasons`, `w_liquidity`, "
+            "`w_freshness`): `config/settings.yaml` → `scanner`.\n"
+            "- **Filtro de basura**: `min_quote_volume_24h` y `max_symbols`.\n"
+            "- **Umbrales de anomalías**: `obi_extreme`, `volume_zscore`, "
+            "`delta_extreme`, `funding_extreme`, liquidaciones."
         )

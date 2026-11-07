@@ -25,4 +25,11 @@ st.set_page_config(
 
 from bot.dashboard.scanner_page import render_scanner_page  # noqa: E402
 
-render_scanner_page(st)
+
+@st.fragment(run_every="3s")
+def _radar() -> None:
+    """El radar se auto-refresca cada 3s sin recargar toda la página."""
+    render_scanner_page(st)
+
+
+_radar()

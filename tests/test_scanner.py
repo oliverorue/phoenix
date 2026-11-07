@@ -15,7 +15,7 @@ def _seed_price(engine: AnomalyEngine, symbol: str, price: float = 1.0) -> None:
 
 
 def test_obi_extreme_signals_long():
-    cfg = ScannerConfig(obi_extreme=0.6, volume_zscore=999.0)
+    cfg = ScannerConfig(obi_extreme=0.6, volume_zscore=999.0, min_reasons=1)
     engine = AnomalyEngine(cfg)
     _seed_price(engine, "XRPUSDT")
 
@@ -29,7 +29,7 @@ def test_obi_extreme_signals_long():
 
 
 def test_funding_extreme_signals_short():
-    cfg = ScannerConfig(funding_extreme=0.0005, obi_extreme=1.5, volume_zscore=999.0)
+    cfg = ScannerConfig(funding_extreme=0.0005, obi_extreme=1.5, volume_zscore=999.0, min_reasons=1)
     engine = AnomalyEngine(cfg)
     _seed_price(engine, "XRPUSDT")
 
@@ -47,6 +47,7 @@ def test_liquidation_cascade_signals_short():
         obi_extreme=1.5,
         funding_extreme=1.0,
         volume_zscore=999.0,
+        min_reasons=1,
     )
     engine = AnomalyEngine(cfg)
     _seed_price(engine, "XRPUSDT")
@@ -124,3 +125,52 @@ def test_risk_engine_load_history():
     risk = RiskEngine(base_risk_pct=0.01)
     risk.load_history([2.5, -1.0, 3.0, -2.0, 4.0])
     assert risk.kelly.get_multiplier() >= 0.3
+
+
+def test_engine_enforces_min_reasons():
+    cfg = ScannerConfig(obi_extreme=0.6, volume_zscore=999.0, min_reasons=2)
+    engine = AnomalyEngine(cfg)
+    _seed_price(engine, "XRPUSDT")
+    engine.on_depth("XRPUSDT", [(1.0, 900.0)], [(1.0, 100.0)])  # solo OBI
+
+    assert engine.evaluate("XRPUSDT", T) is None  # 1 motivo < min_reasons=2
+
+
+def test_ranker_orders_best_first():
+    from bot.scanner.ranker import SignalRanker
+
+    cfg = ScannerConfig(w_confidence=1.0, w_reasons=0.0, w_liquidity=0.0, w_freshness=0.0)
+    ranker = SignalRanker(cfg)
+    best = Signal(symbol="AAA", direction="LONG", confidence=0.9, price=1.0, ts=T, reasons=["a", "b"])
+    worst = Signal(symbol="BBB", direction="LONG", confidence=0.6, price=1.0, ts=T, reasons=["a", "b"])
+
+    ranked = ranker.rank([worst, best], now=T, volumes={})
+    assert ranked[0].signal.symbol == "AAA"
+    assert ranked[1].signal.symbol == "BBB"
+
+
+def test_ranker_freshness_prefers_recent():
+    from bot.scanner.ranker import SignalRanker
+
+    cfg = ScannerConfig(
+        w_confidence=0.0, w_reasons=0.0, w_liquidity=0.0, w_freshness=1.0,
+        freshness_halflife_seconds=100,
+    )
+    ranker = SignalRanker(cfg)
+    fresh = Signal(symbol="F", direction="LONG", confidence=0.5, price=1.0, ts=T, reasons=["a"])
+    stale = Signal(symbol="S", direction="LONG", confidence=0.5, price=1.0, ts=T - 1000, reasons=["a"])
+
+    ranked = ranker.rank([stale, fresh], now=T, volumes={})
+    assert ranked[0].signal.symbol == "F"
+
+
+def test_ranker_liquidity_prefers_high_volume():
+    from bot.scanner.ranker import SignalRanker
+
+    cfg = ScannerConfig(w_confidence=0.0, w_reasons=0.0, w_liquidity=1.0, w_freshness=0.0)
+    ranker = SignalRanker(cfg)
+    big = Signal(symbol="BIG", direction="LONG", confidence=0.5, price=1.0, ts=T, reasons=["a"])
+    small = Signal(symbol="SMALL", direction="LONG", confidence=0.5, price=1.0, ts=T, reasons=["a"])
+
+    ranked = ranker.rank([small, big], now=T, volumes={"BIG": 1_000_000.0, "SMALL": 100.0})
+    assert ranked[0].signal.symbol == "BIG"
