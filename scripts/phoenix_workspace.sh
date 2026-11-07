@@ -15,12 +15,8 @@ if screen -ls 2>/dev/null | grep -q "\.$SESSION"; then
     exec screen -r "$SESSION"
 fi
 
-screen -dmS "$SESSION" -t bot bash -lc \
+screen -dmS "$SESSION" -t monitor bash -lc \
     "journalctl --user -u phoenix-bot -f"
-screen -S "$SESSION" -X screen -t logs bash -lc \
-    "tail -n 50 -f '$REPO_DIR/logs/bot.log'"
-screen -S "$SESSION" -X screen -t metrics bash -lc \
-    "watch -n 10 cat '$REPO_DIR/data/metrics.json'"
 screen -S "$SESSION" -X screen -t dashboard bash -lc \
     "echo 'Dashboard: http://127.0.0.1:8502'; echo; systemctl --user status phoenix-dashboard --no-pager || true; exec bash"
 screen -S "$SESSION" -X screen -t shell bash -lc \

@@ -16,7 +16,6 @@
 
 # ─── Variables ─────────────────────────────────────────────────────
 COMPOSE_FILE     := docker-compose.yml
-COMPOSE_OVERRIDE := docker-compose.override.yml
 SERVICE_BOT      := bot
 SERVICE_DASH     := dashboard
 IMAGE_TAG        := phoenix:latest
@@ -30,7 +29,7 @@ build-nc:
 
 # ─── Up ────────────────────────────────────────────────────────────
 up: build
-	docker compose -f $(COMPOSE_FILE) -f $(COMPOSE_OVERRIDE) up -d
+	docker compose -f $(COMPOSE_FILE) up -d
 
 up-prod: build
 	docker compose -f $(COMPOSE_FILE) up -d

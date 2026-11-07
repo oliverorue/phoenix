@@ -55,36 +55,27 @@ case "${1:-status}" in
         exec "$REPO_DIR/scripts/phoenix_workspace.sh"
         ;;
     report)
-        echo "Modo monitor-only: reporte histórico (el bot ya no opera)."
+        echo "Modo monitor-only: señales y resultados del radar."
         python3 - <<'PY'
-import json
 import sqlite3
 from pathlib import Path
 
-m = Path("data/metrics.json")
-if m.exists():
-    d = json.loads(m.read_text())
-    print(f"Balance: ${d.get('balance', 0):.2f}")
-    print(f"Equity:  ${d.get('equity', 0):.2f}")
-    print(f"Posiciones: {len(d.get('positions', []))}")
-    print(f"Riesgo: {d.get('risk')}")
-
-db = Path("data/bot_history.db")
-if db.exists():
+db = Path("data/scanner_signals.db")
+if not db.exists():
+    print("Todavía no hay señales persistidas (data/scanner_signals.db).")
+else:
     con = sqlite3.connect(db)
     try:
-        cur = con.execute(
-            "SELECT COUNT(*), COALESCE(SUM(pnl_usdt), 0) FROM trades"
-        )
-        n, pnl = cur.fetchone()
-        print(f"Trades cerrados: {n} | PnL neto: {pnl:+.4f} USDT")
-        cur = con.execute(
-            "SELECT symbol, side, exit_time, pnl_usdt, close_reason "
-            "FROM trades ORDER BY id DESC LIMIT 5"
-        )
-        print("Últimos trades:")
-        for row in cur.fetchall():
-            print("  ", row)
+        n = con.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+        won = con.execute("SELECT COUNT(*) FROM signals WHERE outcome='WIN'").fetchone()[0]
+        lost = con.execute("SELECT COUNT(*) FROM signals WHERE outcome='LOSS'").fetchone()[0]
+        pnl = con.execute(
+            "SELECT COALESCE(SUM(pnl_usdt), 0) FROM signals "
+            "WHERE outcome IN ('WIN','LOSS')"
+        ).fetchone()[0]
+        closed = won + lost
+        wr = (won / closed * 100) if closed else 0
+        print(f"Señales: {n} | WIN {won} | LOSS {lost} | Win rate {wr:.0f}% | PnL {pnl:+.2f} USDT")
     finally:
         con.close()
 PY

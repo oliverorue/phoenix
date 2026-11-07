@@ -9,7 +9,6 @@ Type=simple
 WorkingDirectory=@LINK_DIR@
 ExecStart=/usr/bin/python3 -m streamlit run @LINK_DIR@/bot/dashboard/app.py --server.address=127.0.0.1 --server.port=8502 --server.headless=true --server.fileWatcherType=none --browser.gatherUsageStats=false
 Environment=PYTHONUNBUFFERED=1
-Environment=PHOENIX_DASHBOARD_ALLOW_BOT_CONTROL=false
 Restart=always
 RestartSec=10
 TimeoutStopSec=15

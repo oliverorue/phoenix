@@ -50,9 +50,9 @@ RUN mkdir -p /app/data /app/logs \
 
 USER botuser
 
-# Health check: verifica que los puertos de métricas respondan o el proceso esté vivo
+# Health check: verifica que el proceso del monitor siga vivo
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python3 -c "import sys, os; sys.exit(0 if os.path.exists('/app/data/bot_state_persistent.json') else 1)"
+    CMD pgrep -f "bot.monitor" > /dev/null
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["bot"]
