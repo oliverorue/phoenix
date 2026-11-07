@@ -18,7 +18,6 @@ from config.loader import (
 from bot.core.exchange_client import BinanceFuturesClient, MarketDataException
 from bot.core.api_resilience import CircuitBreaker, api_retry_async
 from bot.core.timeframes import normalize_interval
-from bot.core.tracing import trace
 
 
 def decimal_places_for_qty_step(qty_step: float) -> int:
@@ -128,7 +127,6 @@ class DataFeed:
 
     # ── REST: Velas históricas ──────────────────────
 
-    @trace(attributes={"component": "DataFeed"})
     @api_retry_async(max_retries=3, base_delay=2.0)
     async def get_klines(self, interval: str, limit: int = 100) -> pd.DataFrame:
         """Obtiene velas OHLCV desde Binance (async)."""
@@ -171,7 +169,6 @@ class DataFeed:
 
     # ── Balance ────────────────────────────────────
 
-    @trace(attributes={"component": "DataFeed"})
     @api_retry_async(max_retries=3, base_delay=2.0)
     async def get_balance(self) -> float:
         """Consulta el balance USDT disponible desde futures_account (async)."""

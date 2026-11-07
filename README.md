@@ -1,320 +1,84 @@
-# 🔥 Phoenix — Binance USDⓈ-M Futures Signal Monitor
+# 📡 Phoenix — Binance USDⓈ-M Futures Signal Monitor
 
-> **Modo actual: monitor-only.** Phoenix **no ejecuta órdenes**. Muestra señales,
-> SL/TP y tamaño sugerido para operar manualmente. El trading paper/live está
-> deshabilitado a nivel de entrypoint, dashboard y servicios.
->
-> **Versión:** v5.1 — Señales calibradas para capital mínimo de **$50 USD**
-> 
-> Monitor de scalping algorítmico para Binance Futures, con estrategia basada en pullbacks,
-> fases de escalamiento y dimensionamiento sugerido. El backtester sigue disponible para validación.
+> **Modo actual: monitor-only.** Phoenix **no ejecuta órdenes**. Es un radar de
+> mercado que escanea cientos de pares, detecta anomalías (order book imbalance,
+> volume delta, funding extremo, liquidaciones en cascada) y te muestra **las
+> mejores 3 señales** para operar manualmente, con el tamaño Kelly ya calculado.
 
 ---
 
-## 🎯 ¿Para quién es este bot?
+## Qué hace
 
-| Perfil | ¿Recomendado? |
-|--------|:-------------:|
-| 🟢 Capital **$50-100** | ✅ **Sí** — Solo XRPUSDT, riesgo 0.6%, objetivos realistas |
-| 🟢 Capital **$100-500** | ✅ Sí — Más símbolos, riesgo progresivo |
-| 🟡 Capital **$500-1500** | ✅ Sí — Apalancamiento 2x desde Fase 3 |
-| 🔴 Capital < $50 | ❌ No — Comisiones devoran las ganancias |
+- **Escáner global async**: descubre todos los perpetuos USDT-M, filtra monedas
+  con poco volumen y se conecta vía WebSockets combinados (bajo consumo de RAM).
+- **Motor de anomalías**: OBI, volume delta, funding rate y cascadas de liquidación.
+- **Ranking**: ordena por confianza + confluencia + liquidez + frescura y muestra
+  solo las mejores N.
+- **Gestión de riesgo**: tamaño Kelly por señal, capital y riesgo configurables.
+- **Journal**: persiste señales y resultados (WIN/LOSS) en SQLite; el Kelly
+  aprende de tus resultados reales.
 
-> 📖 **Guía completa para $50:** [`SETUP_50USD.md`](SETUP_50USD.md)
->
-> Si tienes $50 en Binance, **empieza por ahí**. Este README es la referencia general.
-
----
-
-## ✨ Características
-
-> **Nota:** las capacidades de ejecución (paper/live, trailing, breakeven)
-> describen el motor legacy y **no están activas** en este build monitor-only.
-
-- **Scalping en pullbacks** — Entra en retrocesos dentro de tendencias fuertes (ADX > 22)
-- **Multi-timeframe** — Tendencia en 1h, entrada en 15m
-- **Score multi-factor** — Score 0-100 (mínimo 80 para operar): tendencia + pullback + RSI + patrones + volumen
-- **Fases de escalamiento automáticas** — El bot ajusta riesgo, RR y SL según tu balance
-- **Kelly Criterion dinámico** — Sizing adaptativo basado en historial de trades
-- **Breakeven offset** — SL se mueve 0.08% sobre entry para cubrir comisiones
-- **Trailing stop** — Después de TP1, activa trailing para capturar más ganancia
-- **Protecciones** — Máx 2 stops/día, drawdown controlado, circuit breaker de API
-- **Paper Trading** — Modo simulación sin riesgo real (¡úselo siempre primero!)
-- **Dashboard Streamlit** — Monitoreo en tiempo real en `http://localhost:8502`
-- **Detección de reversiones** — Cierra posición si hay señales contrarias fuertes
-
----
-
-## 📦 Requisitos
-
-- **Python 3.10+**
-- **Cuenta en Binance** (Testnet para pruebas, Mainnet para real)
-- **$50+ USD** en Binance Futures (si vas a mainnet)
-- **API Keys** de Binance con permisos de Futures
-
----
-
-## ⚙️ Instalación
-
-### Opción 1: Directa
+## Instalación
 
 ```bash
-git clone <repo-url> trading_bot
-cd trading_bot
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+cd phoenix
+pip install -r requirements.txt
+cp config/secrets.env.example config/secrets.env   # solo si querés alertas
 ```
 
-### Opción 2: Docker
+## Uso
 
 ```bash
-docker compose up -d
-```
+# Dashboard (recomendado)
+streamlit run bot/dashboard/app.py
 
----
+# Radar standalone (consola)
+python3 -m bot.scanner.market_scanner
 
-## 🔧 Configuración Rápida
-
-### 1. API Keys
-
-Edita [`config/secrets.env`](config/secrets.env):
-
-```bash
-BINANCE_API_KEY=tu_api_key
-BINANCE_API_SECRET=tu_api_secret
-TESTNET=true        # true para pruebas, false para real
-```
-
-### 2. Verificar Configuración
-
-```bash
-python -c "from config.loader import validate_config; msgs = validate_config(raise_on_error=False); print('\n'.join(msgs))"
-```
-
-### 2b. Modo monitor-only (actual)
-
-`monitor_only: true` en `config/settings.yaml` deshabilita toda ejecución de
-órdenes. El monitor usa datos públicos de Binance y **no requiere API keys
-privadas**; solo necesita `TELEGRAM_TOKEN`/`DISCORD_WEBHOOK` si querés alertas.
-
-Las secciones de testnet/mainnet y `LIVE_TRADING_CONFIRMED` quedan como
-referencia histórica del motor de trading, que ya no está en el camino
-operativo. El dashboard no puede iniciar/detener el bot.
-
-### 3. Iniciar
-
-```bash
-python3 -m bot.monitor
-# o una sola evaluación:
+# Monitor de un solo símbolo
 python3 -m bot.monitor --once
 ```
 
-### 4. Correr 24/7 como servicio (recomendado)
+## Cómo operar
 
-Instala bot y dashboard como servicios de usuario de systemd:
+Leé [`PLAYBOOK.md`](PLAYBOOK.md): qué hacer, cómo leer una tarjeta, **cuánto
+tiempo estar en un trade (scalp de 15 min a 2 h)**, SL/TP y reglas de riesgo.
+
+## Estructura
+
+```
+bot/
+  scanner/               # radar global: market_scanner, anomaly_engine, ranker, risk_engine, store
+  monitor.py             # monitor de un símbolo (estrategia legacy, solo lectura)
+  dashboard/             # app.py (Streamlit), scanner_page, scanner_bridge
+  core/                  # data_feed, exchange_client, market_data, indicators,
+                         # strategy_engine, kelly_sizing, notifier, ...
+config/
+  settings.yaml          # toda la configuración (scanner, monitor, fases, ...)
+  loader.py              # lee y valida settings.yaml
+scripts/                 # start.sh, docker-entrypoint, phoenix_ctl, systemd
+```
+
+## Configuración
+
+Todo en `config/settings.yaml`, sección `scanner`:
+
+| Parámetro | Qué hace |
+|---|---|
+| `min_quote_volume_24h` | Filtra monedas con poco volumen |
+| `max_symbols` | Tope del universo rastreado |
+| `min_confidence` / `min_reasons` | Piso de calidad de las tarjetas |
+| `top_n` | Cuántas señales mostrar |
+| `w_*` | Pesos del ranking (confianza, confluencia, liquidez, frescura) |
+| `obi_extreme` / `volume_zscore` / `delta_extreme` / `funding_extreme` | Sensibilidad del motor |
+
+## Tests
 
 ```bash
-./scripts/install_phoenix_services.sh
+pytest -m "not integration"
+flake8 bot/ --select=E9,F63,F7,F82
 ```
 
-Esto:
+## ⚠️
 
-- Arranca el bot y el dashboard automáticamente al iniciar sesión/encender la notebook.
-- Reinicia el bot si se cae (`Restart=always`).
-- Limita RAM/CPU para no afectar la notebook.
-- Publica el dashboard solo en `127.0.0.1:8502`.
-- Crea el lanzador **Phoenix Workspace** en el menú de aplicaciones.
-
-Comandos útiles:
-
-```bash
-systemctl --user status phoenix-bot
-systemctl --user status phoenix-dashboard
-journalctl --user -u phoenix-bot -f
-~/.local/bin/phoenix status
-~/.local/bin/phoenix report
-~/.local/bin/phoenix stop
-```
-
-Para detener solo el dashboard y liberar RAM:
-
-```bash
-systemctl --user stop phoenix-dashboard
-```
-
-Para volver a abrirlo:
-
-```bash
-~/.local/bin/phoenix dashboard
-```
-
-> Si la notebook se apaga, el bot no corre. Para operación 24/7 real hace falta
-> un VPS o una máquina que quede encendida; systemd solo garantiza que vuelva
-> a arrancar cuando la notebook se encienda.
-
----
-
-## 🚀 Flujo de Implementación Recomendado
-
-Paso a paso para asegurar que no pierdes dinero:
-
-### Semana 1-2: Paper + Testnet
-```yaml
-# settings.yaml
-exchange:
-  testnet: true
-paper_trading:
-  enabled: true
-  initial_balance: 50
-```
-### ✅ Validar: win rate ≥ 50%, profit factor ≥ 1.2, sin errores de API
-
-### Semana 3-4: Paper + Mainnet
-```yaml
-exchange:
-  testnet: false       # Mercado real
-paper_trading:
-  enabled: true        # Pero sin operar real
-```
-### ✅ Validar: bot recibe precios reales, señales coherentes
-
-### Semana 5+: Mainnet Real
-```yaml
-paper_trading:
-  enabled: false       # Ahora sí, dinero real
-```
-### ✅ Monitorear a diario las primeras 2 semanas
-
----
-
-## 📊 Estrategia (Resumen Técnico)
-
-### Filtros de Entrada
-
-| Filtro | Parámetro | Valor |
-|--------|-----------|-------|
-| Tendencia | EMA50(1h) + ADX | ADX > 22, precio > EMA50 para LONG |
-| Pullback | EMA20(15m) | Precio dentro de 0.8% de EMA20 |
-| RSI | RSI(15m) | LONG: 22-38, SHORT: 68-75 |
-| Score mínimo | — | ≥ 80/100 |
-| Patrón vela | Pin bar, engulfing | +15 puntos |
-| Volumen | vs MA10 | > 1.5x = +15 puntos |
-| Cooldown | 3 velas 15m | Tras cada señal emitida |
-
-### Gestión de Riesgo por Fase
-
-| Fase | Capital | Riesgo | TP1 | TP2 | Apalancamiento |
-|------|---------|--------|-----|-----|---------------|
-| 0 | $0-100 | 0.6% | 2.0RR | 3.0RR | 1x |
-| 1 | $100-200 | 1.2% | 2.0RR | 3.0RR | 1x |
-| 2 | $200-500 | 1.5% | 2.0RR | 3.0RR | 1x |
-| 3 | $500-1500 | 1.2% | 1.8RR | 3.0RR | 2x |
-| 4 | $1500+ | 1.0% | 1.5RR | 3.0RR | 3x |
-
-### Breakeven Offset
-
-El SL **no** se mueve exactamente a `entry_price`. Se mueve 0.08% **por encima** (LONG)
-o **por debajo** (SHORT) para cubrir comisiones de entrada + salida. Esto elimina las
-micro-pérdidas cuando el precio roza entry y se revierte.
-
----
-
-## 🧪 Backtest
-
-```bash
-# Backtest básico XRPUSDT con $50
-python scripts/backtest.py --symbol XRPUSDT --capital 50 --start 2026-04-01 --end 2026-05-01
-
-# Con más detalle
-python scripts/backtest.py --symbol XRPUSDT --capital 50 --start 2026-04-01 --end 2026-05-01 --verbose
-```
-
-Resultados se guardan en `logs/backtest_XRPUSDT_*.csv`
-
----
-
-## 📁 Estructura del Proyecto
-
-```
-trading_bot/
-├── bot/
-│   ├── main.py                     # Entry point
-│   ├── core/
-│   │   ├── strategy_engine.py      # Lógica de estrategia y scoring
-│   │   ├── position_manager.py     # Breakeven, trailing, reversiones
-│   │   ├── risk_manager.py         # Fases, drawdown, stops diarios
-│   │   ├── execution.py            # Órdenes en Binance
-│   │   ├── backtester.py           # Motor de backtesting
-│   │   ├── kelly_sizing.py         # Kelly Criterion dinámico
-│   │   ├── indicators.py           # Cálculo de indicadores técnicos
-│   │   ├── paper_executor.py       # Simulador de ejecución
-│   │   └── ...
-│   └── dashboard/
-│       └── app.py                  # Streamlit dashboard
-├── config/
-│   ├── settings.yaml               # Configuración principal
-│   └── loader.py                   # Cargador de configuración
-├── data/                           # Datos históricos (CSV)
-├── logs/                           # Logs del bot
-├── scripts/
-│   ├── backtest.py                 # CLI de backtesting
-│   └── benchmark.py                # Benchmarks de rendimiento
-├── SETUP_50USD.md                  # Guía completa para $50
-└── ARCHITECTURE.md                 # Documentación técnica
-```
-
----
-
-## 📈 Dashboard
-
-Monitor en tiempo real via Streamlit:
-
-```bash
-# Con systemd:
-~/.local/bin/phoenix dashboard
-# Abre: http://127.0.0.1:8502
-```
-
-**Métricas clave:**
-- Balance actual y PnL diario
-- Trades activos e historial reciente
-- Señales con score (mínimo configurable; 35 por defecto)
-- Drawdown y límites de riesgo
-- Distribución LONG/SHORT
-
----
-
-## 🛡️ Protecciones
-
-- **Circuit breaker de API:** 5 fallos → 15 min de pausa
-- **Máx 2 stops por día:** Límite duro para evitar overtrading
-- **Máx 2 pérdidas consecutivas:** El bot se detiene solo
-- **Drawdown diario 3%:** Si se supera, detiene operaciones
-- **Cooldown:** 3 velas 15m entre señales del mismo tipo
-- **Filtro de volatilidad:** No opera si la volatilidad es extrema
-- **Notificaciones:** Telegram/Discord opcionales
-
----
-
-## 🔄 CI/CD
-
-Ver [`.github/workflows/`](.github/workflows/) para pipelines de CI/CD.
-
----
-
-## 🏗️ Arquitectura
-
-Ver [`ARCHITECTURE.md`](ARCHITECTURE.md) para documentación detallada de la arquitectura.
-
-La comunicación entre el Orchestrator (modo arquitecto) y el implementador (modo código)
-sigue el protocolo DeepSeek V4: plan claro → implementación modular → validación.
-
----
-
-## 📝 Licencia
-
-MIT — Para uso educativo y personal. No es asesoría financiera.
-
-> ⚠️ **ADVERTENCIA:** Trading con apalancamiento conlleva riesgo de pérdida total del capital.
-> Este bot es una herramienta técnica, no una garantía de ganancias. Úselo bajo su propia responsabilidad.
+El radar no garantiza ganancias. Valida en papel antes de arriesgar plata real.

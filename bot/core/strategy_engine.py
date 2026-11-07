@@ -36,7 +36,6 @@ import pandas as pd
 
 from config.loader import get_phase_config, TIMEZONE_NAME
 from bot.core.indicators import Indicators
-from bot.core.tracing import trace
 
 
 class Signal:
@@ -117,7 +116,6 @@ class ScalpingStrategy:
         self._consecutive_losses_same_dir: dict[str, int] = {"LONG": 0, "SHORT": 0}  # rachas por dirección
 
     # ── Método principal ──────────────────────────────────
-    @trace(attributes={"component": "ScalpingStrategy"})
     def evaluate(self, df_1h: pd.DataFrame, df_15m: pd.DataFrame,
                  current_price: float, balance: float,
                  market_signal: Optional[dict[str, Any]] = None) -> Signal:
