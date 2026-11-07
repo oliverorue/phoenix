@@ -68,3 +68,8 @@ class RiskEngine:
 
     def record_trade(self, pnl_usdt: float) -> None:
         self.kelly.record_trade(pnl_usdt)
+
+    def load_history(self, pnl_usdts: list[float]) -> None:
+        """Reconstruye el estado de Kelly a partir de resultados históricos."""
+        for pnl in pnl_usdts:
+            self.kelly.record_trade(pnl)

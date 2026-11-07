@@ -67,6 +67,37 @@ def _card_html(sig: Signal, risk_usdt: float, risk_pct: float,
     )
 
 
+def _render_history(st_module: Any, bridge: ScannerBridge) -> None:
+    """Historial persistido de señales + registro manual de resultados."""
+    s = bridge.store.stats()
+    c1, c2, c3 = st_module.columns(3)
+    c1.metric("Resultados registrados", s["total"])
+    c2.metric("Win rate", f"{s['win_rate'] * 100:.0f}%")
+    c3.metric("PnL", f"${s['pnl']:+.2f}")
+
+    rows = bridge.store.recent(30)
+    if not rows:
+        st_module.caption("Todavía no hay señales persistidas.")
+        return
+
+    options = {
+        f"#{r['id']} {r['symbol']} {r['direction']} "
+        f"({r['confidence'] * 100:.0f}%)": r["id"]
+        for r in rows
+    }
+    sel = st_module.selectbox("Señal", list(options.keys()))
+    col_o, col_p = st_module.columns(2)
+    outcome = col_o.selectbox("Resultado", ["WIN", "LOSS", "SKIP"])
+    pnl = col_p.number_input("PnL (USDT)", value=0.0, step=0.1)
+    if st_module.button("Registrar resultado"):
+        sid = options[sel]
+        bridge.store.set_outcome(sid, outcome, pnl)
+        if outcome in ("WIN", "LOSS"):
+            bridge.risk.record_trade(pnl)
+        st_module.toast(f"✅ {outcome} registrado para #{sid}")
+        st_module.rerun()
+
+
 def render_scanner_page(st_module: Any = st) -> None:
     """Renderiza el radar completo. Importar en ``app.py``."""
     st_module.title("📡 Radar Global — Binance USDⓈ-M Futures")
@@ -149,6 +180,9 @@ def render_scanner_page(st_module: Any = st) -> None:
             "El radar no garantiza ganancias: reduce el ruido y te da contexto. "
             "El edge está en la constancia y el control de riesgo, no en acertar siempre."
         )
+
+    with st_module.expander("📒 Historial de señales", expanded=False):
+        _render_history(st_module, bridge)
 
     with st_module.expander("🔧 Qué se puede cambiar", expanded=False):
         st_module.markdown(
