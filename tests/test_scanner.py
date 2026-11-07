@@ -95,32 +95,6 @@ def test_scanner_config_from_settings():
     assert cfg.max_symbols > 0
 
 
-def test_signal_store_persistence(tmp_path):
-    from bot.scanner.store import SignalStore
-
-    store = SignalStore(db_path=tmp_path / "signals.db")
-    sid = store.save(Signal(
-        symbol="XRPUSDT", direction="LONG", confidence=0.8,
-        price=1.0, ts=1000.0, reasons=["OBI alcista"],
-    ))
-    assert sid > 0
-    store.set_outcome(sid, "WIN", 2.5)
-    store.save(Signal(
-        symbol="SOLUSDT", direction="SHORT", confidence=0.6,
-        price=90.0, ts=1001.0, reasons=["Venta agresiva"],
-    ))
-    store.set_outcome(sid + 1, "LOSS", -1.0)
-
-    stats = store.stats()
-    assert stats["total"] == 2
-    assert stats["wins"] == 1 and stats["losses"] == 1
-    assert stats["win_rate"] == pytest.approx(0.5)
-    assert stats["pnl"] == pytest.approx(1.5)
-    assert store.load_pnl() == pytest.approx([2.5, -1.0])
-    assert len(store.recent(10)) == 2
-    store.close()
-
-
 def test_risk_engine_load_history():
     risk = RiskEngine(base_risk_pct=0.01)
     risk.load_history([2.5, -1.0, 3.0, -2.0, 4.0])

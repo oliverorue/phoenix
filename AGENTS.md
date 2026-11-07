@@ -16,7 +16,7 @@ Phoenix es un **monitor global de mercado**:
   y rankea las **mejores N señales** (confianza + confluencia + liquidez + frescura).
 - `bot/monitor.py` — monitor de un solo símbolo (la estrategia legacy, solo lectura).
 - `bot/dashboard/` — UI Streamlit que muestra las tarjetas LONG/SHORT, el tamaño
-  Kelly y persiste señales/resultados en SQLite.
+  Kelly y permite abrir trades paper (dry-run) que se persisten en SQLite.
 
 El objetivo es **calidad de señal y gestión de riesgo**, no ejecución automática.
 
@@ -29,7 +29,7 @@ El objetivo es **calidad de señal y gestión de riesgo**, no ejecución automá
 - **Config/validación**: `pydantic` v2, `PyYAML`, `python-dotenv`.
 - **Logging**: `loguru`.
 - **Dashboard**: `streamlit` (sin plotly; el radar renderiza HTML).
-- **Persistencia**: SQLite (`data/scanner_signals.db`).
+- **Persistencia**: SQLite (`data/paper_trades.db` para trades paper).
 
 No agregar dependencias nuevas sin justificar que el stack actual no resuelve el problema.
 
@@ -87,7 +87,8 @@ Reglas:
 
 | Área | Archivos |
 |---|---|
-| Radar global (scanner) | `bot/scanner/market_scanner.py`, `anomaly_engine.py`, `ranker.py`, `risk_engine.py`, `store.py`, `config.py`, `models.py` |
+| Radar global (scanner) | `bot/scanner/market_scanner.py`, `anomaly_engine.py`, `ranker.py`, `risk_engine.py`, `config.py`, `models.py` |
+| Ejecución (paper/live) | `bot/execution/models.py`, `state_machine.py`, `manager.py`, `sizing.py`, `store.py`, `broker.py` |
 | Monitor 1 símbolo | `bot/monitor.py` |
 | Dashboard | `bot/dashboard/app.py`, `scanner_page.py`, `scanner_bridge.py` |
 | Datos/exchange | `bot/core/data_feed.py`, `exchange_client.py`, `market_data.py`, `api_resilience.py`, `rate_limiter.py`, `timeframes.py` |

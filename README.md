@@ -15,8 +15,9 @@
 - **Ranking**: ordena por confianza + confluencia + liquidez + frescura y muestra
   solo las mejores N.
 - **Gestión de riesgo**: tamaño Kelly por señal, capital y riesgo configurables.
-- **Journal**: persiste señales y resultados (WIN/LOSS) en SQLite; el Kelly
-  aprende de tus resultados reales.
+- **Paper automático**: el botón "Operar" abre un trade dry-run que se gestiona
+  solo (SL → TP1 parcial → breakeven → trailing → TP2) y se persiste en SQLite;
+  el Kelly aprende solo del PnL de los trades.
 
 ## Instalación
 
@@ -48,7 +49,8 @@ tiempo estar en un trade (scalp de 15 min a 2 h)**, SL/TP y reglas de riesgo.
 
 ```
 bot/
-  scanner/               # radar global: market_scanner, anomaly_engine, ranker, risk_engine, store
+  scanner/               # radar global: market_scanner, anomaly_engine, ranker, risk_engine
+  execution/             # trades: models, state_machine, manager, sizing, store, broker
   monitor.py             # monitor de un símbolo (estrategia legacy, solo lectura)
   dashboard/             # app.py (Streamlit), scanner_page, scanner_bridge
   core/                  # data_feed, exchange_client, market_data, indicators,

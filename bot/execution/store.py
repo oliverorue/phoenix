@@ -2,7 +2,7 @@
 
 Guarda el estado completo de cada ``Trade`` (niveles, fills, PnL) para que el
 ciclo sobreviva reinicios y para alimentar el Kelly con el historial real.
-Thread-safe (lock interno), igual que ``SignalStore``.
+Thread-safe (lock interno).
 """
 
 from __future__ import annotations

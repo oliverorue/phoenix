@@ -28,7 +28,6 @@ from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import ScannerStats, Signal
 from bot.scanner.ranker import RankedSignal, SignalRanker
 from bot.scanner.risk_engine import RiskEngine
-from bot.scanner.store import SignalStore
 
 
 class ScannerBridge:
@@ -41,9 +40,7 @@ class ScannerBridge:
     ) -> None:
         self._config = config or ScannerConfig.from_settings()
         self._dry_run = self._config.dry_run
-        self.store = SignalStore()
         self.risk = RiskEngine(base_risk_pct=base_risk_pct)
-        self.risk.load_history(self.store.load_pnl())
         self.ranker = SignalRanker(self._config)
         self.trade_store = TradeStore()
         self.trades = TradeManager(
@@ -51,7 +48,7 @@ class ScannerBridge:
         )
         self.trades.load(self.trade_store)
         self.risk.load_history(self.trade_store.load_pnl())
-        self._scanner = MarketScanner(self._config, on_signal=self.store.save)
+        self._scanner = MarketScanner(self._config)
         self._scanner.on_price = self.trades.on_price
         self._thread: Optional[threading.Thread] = None
 

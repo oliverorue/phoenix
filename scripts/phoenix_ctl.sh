@@ -55,27 +55,27 @@ case "${1:-status}" in
         exec "$REPO_DIR/scripts/phoenix_workspace.sh"
         ;;
     report)
-        echo "Modo monitor-only: señales y resultados del radar."
+        echo "Paper trading (dry-run): trades y resultados."
         python3 - <<'PY'
 import sqlite3
 from pathlib import Path
 
-db = Path("data/scanner_signals.db")
+db = Path("data/paper_trades.db")
 if not db.exists():
-    print("Todavía no hay señales persistidas (data/scanner_signals.db).")
+    print("Todavía no hay trades paper (data/paper_trades.db).")
 else:
     con = sqlite3.connect(db)
     try:
-        n = con.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
-        won = con.execute("SELECT COUNT(*) FROM signals WHERE outcome='WIN'").fetchone()[0]
-        lost = con.execute("SELECT COUNT(*) FROM signals WHERE outcome='LOSS'").fetchone()[0]
+        total = con.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
+        openn = con.execute("SELECT COUNT(*) FROM paper_trades WHERE status != 'CLOSED'").fetchone()[0]
+        won = con.execute("SELECT COUNT(*) FROM paper_trades WHERE status='CLOSED' AND realized_pnl > 0").fetchone()[0]
+        lost = con.execute("SELECT COUNT(*) FROM paper_trades WHERE status='CLOSED' AND realized_pnl < 0").fetchone()[0]
         pnl = con.execute(
-            "SELECT COALESCE(SUM(pnl_usdt), 0) FROM signals "
-            "WHERE outcome IN ('WIN','LOSS')"
+            "SELECT COALESCE(SUM(realized_pnl), 0) FROM paper_trades WHERE status='CLOSED'"
         ).fetchone()[0]
         closed = won + lost
         wr = (won / closed * 100) if closed else 0
-        print(f"Señales: {n} | WIN {won} | LOSS {lost} | Win rate {wr:.0f}% | PnL {pnl:+.2f} USDT")
+        print(f"Trades: {total} | abiertos {openn} | WIN {won} | LOSS {lost} | Win rate {wr:.0f}% | PnL {pnl:+.2f} USDT")
     finally:
         con.close()
 PY

@@ -81,10 +81,11 @@ Estas señales son **scalps**: entrás y salís en **minutos a 2 horas**.
 
 ## 6. Después de cada trade
 
-1. Abrí **"📒 Historial de señales"** en el Radar.
-2. Elegí la señal y registrá el resultado: **WIN / LOSS** + el PnL real.
-3. El **Kelly** se ajusta solo con tus resultados: sube el tamaño si venís bien,
-   lo baja si venís mal.
+1. Apretá **"🛒 Operar (paper)"** en la tarjeta: el bot abre el trade y lo
+   gestiona solo (SL → TP1 parcial → breakeven → trailing → TP2).
+2. No anotás nada a mano: el trade queda registrado en SQLite y el **Kelly** se
+   ajusta solo con el PnL real (sube el tamaño si venís bien, lo baja si mal).
+3. Seguí el PnL latente, el win-rate y los cerrados en el panel **"📊 Paper"**.
 
 ---
 
