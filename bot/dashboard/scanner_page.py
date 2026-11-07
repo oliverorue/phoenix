@@ -100,6 +100,22 @@ def render_scanner_page(st_module: Any = st) -> None:
     c3.metric("Eventos", f"{stats.events_processed:,}")
     c4.metric("Reconexiones", stats.reconnects)
 
+    d = stats.diagnostics
+    st_module.markdown(
+        f"🔍 Diagnóstico — evals `{d.get('evals', 0)}` · agg `{d.get('agg', 0)}` · "
+        f"depth `{d.get('depth', 0)}` · funding `{d.get('funding', 0)}` · force `{d.get('force', 0)}`"
+    )
+    st_module.markdown(
+        f"🎯 Hits — OBI `{d.get('obi_hits', 0)}` · delta `{d.get('delta_hits', 0)}` · "
+        f"spike `{d.get('spike_hits', 0)}` · funding `{d.get('funding_hits', 0)}` · "
+        f"cascade `{d.get('cascade_hits', 0)}`"
+    )
+    sc = stats.stream_counts
+    if sc:
+        st_module.markdown(
+            "📊 Streams — " + " · ".join(f"`{k}` {v}" for k, v in sorted(sc.items()))
+        )
+
     if stats.last_error:
         st_module.warning(f"Último error: {stats.last_error}")
     if not bridge.is_running():

@@ -56,10 +56,13 @@ scanner:
   depth_symbols_limit: 30       # solo top-N por volumen llevan depth
   funding_poll_seconds: 60
   signal_queue_maxlen: 200
-  obi_extreme: 0.6
-  volume_zscore: 3.0
-  funding_extreme: 0.0005
-  liq_cascade_min_events: 5
+  signal_cooldown_seconds: 120
+  obi_extreme: 0.35
+  volume_zscore: 2.0
+  delta_extreme: 0.2
+  volume_delta_window_seconds: 60
+  funding_extreme: 0.0003
+  liq_cascade_min_events: 3
   liq_cascade_min_notional: 2000000
 indicators:
   ma_periods:

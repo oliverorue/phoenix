@@ -65,3 +65,5 @@ class ScannerStats(BaseModel):
     reconnects: int = 0
     uptime_seconds: float = 0.0
     last_error: Optional[str] = None
+    diagnostics: dict[str, int] = Field(default_factory=dict)
+    stream_counts: dict[str, int] = Field(default_factory=dict)

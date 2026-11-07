@@ -38,14 +38,16 @@ class ScannerConfig(BaseModel):
 
     # ── Cola de señales (backpressure) ──────────────────
     signal_queue_maxlen: int = 200
+    signal_cooldown_seconds: int = 120  # no re-emitir mismo símbolo+dirección
 
     # ── Umbrales del motor de anomalías ─────────────────
-    obi_extreme: float = 0.6               # |imbalance| del book > 0.6
-    volume_zscore: float = 3.0             # z-score de volumen para "spike"
-    volume_delta_window: int = 60          # nº de trades en la ventana delta
-    funding_extreme: float = 0.0005        # |funding| > 0.05% es extremo
+    obi_extreme: float = 0.35              # |imbalance| del book > 0.35
+    volume_zscore: float = 2.0             # z-score de volumen para "spike"
+    delta_extreme: float = 0.20            # |delta| > 0.20 = taker unidireccional
+    volume_delta_window_seconds: int = 60  # ventana móvil del volume delta
+    funding_extreme: float = 0.0003        # |funding| > 0.03% es extremo
     liq_cascade_window_seconds: int = 60   # ventana para liquidaciones
-    liq_cascade_min_events: int = 5        # nº mínimo de forced-orders
+    liq_cascade_min_events: int = 3        # nº mínimo de forced-orders
     liq_cascade_min_notional: float = 2_000_000.0  # nocional mínimo liquidado
 
     @classmethod

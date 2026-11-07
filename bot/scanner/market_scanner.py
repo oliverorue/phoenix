@@ -38,6 +38,17 @@ from bot.scanner.models import PairMeta, ScannerStats, Signal
 _WSS_MAIN = "wss://fstream.binance.com"
 _WSS_TESTNET = "wss://stream.binancefuture.com"
 
+# Binance migró (2026) los WS de USDⓈ-M futures a rutas por categoría.
+# Legacy `/stream` solo sirve la categoría `public`; `market` se descarta en
+# silencio. Mapeo: public = depth/bookTicker; market = aggTrade/markPrice/
+# kline/miniTicker/forceOrder.
+_PUBLIC = "/public"
+_MARKET = "/market"
+
+# Un stream "muerto" no lanza error (el handshake da 101 y luego 0 frames).
+# Todos nuestros streams emiten al menos 1 msg/s, así que 60s sin datos = falla.
+_STALE_SECONDS = 60
+
 StreamHandler = Callable[[str, Any], Awaitable[None]]
 
 
@@ -74,6 +85,8 @@ class MarketScanner:
             "reconnects": 0, "last_error": None,
         }
         self._eval_throttle: dict[str, float] = {}
+        self._last_emit: dict[str, tuple[float, str]] = {}
+        self._stream_counts: dict[str, int] = {}
 
     # ── Discovery ────────────────────────────────────────
 
@@ -120,24 +133,32 @@ class MarketScanner:
         return _WSS_TESTNET if self._testnet else _WSS_MAIN
 
     def _global_stream_url(self) -> str:
-        return f"{self._base_url()}/stream?streams=!miniTicker@arr/!forceOrder@arr"
+        return f"{self._base_url()}{_MARKET}/stream?streams=!miniTicker@arr/!forceOrder@arr"
 
     def _shard_urls(self) -> list[str]:
-        """Reparte los símbolos rastreados en sockets combinados acotados."""
-        symbols = sorted(self._tracked)
-        depth_cap = min(self._cfg.depth_symbols_limit, len(symbols))
-        depth_symbols = set(symbols[:depth_cap])
+        """Devuelve sockets combinados separados: aggTrade (por shard) y depth (top-N).
 
-        urls: list[str] = []
+        Se separan para no mezclar streams de alta frecuencia (aggTrade) con el
+        book parcial en el mismo socket, y reducir la carga por conexión.
+        """
+        symbols = sorted(self._tracked)
+        base = self._base_url()
         chunk = self._cfg.symbols_per_shard
+        urls: list[str] = []
+
         for i in range(0, len(symbols), chunk):
             group = symbols[i:i + chunk]
-            streams = [f"{s.lower()}@aggTrade" for s in group]
-            streams += [
-                f"{s.lower()}@depth{self._cfg.depth_levels}"
-                for s in group if s in depth_symbols
-            ]
-            urls.append(f"{self._base_url()}/stream?streams={'/'.join(streams)}")
+            agg = "/".join(f"{s.lower()}@aggTrade" for s in group)
+            urls.append(f"{base}{_MARKET}/stream?streams={agg}")
+
+        depth_symbols = symbols[:self._cfg.depth_symbols_limit]
+        for i in range(0, len(depth_symbols), chunk):
+            group = depth_symbols[i:i + chunk]
+            depth = "/".join(
+                f"{s.lower()}@depth{self._cfg.depth_levels}" for s in group
+            )
+            urls.append(f"{base}{_PUBLIC}/stream?streams={depth}")
+
         return urls
 
     # ── Ciclo de vida ────────────────────────────────────
@@ -188,11 +209,27 @@ class MarketScanner:
                 ) as ws:
                     backoff = self._cfg.reconnect_base_seconds
                     logger.info(f"[scanner] conectado a {url[:60]}...")
-                    async for raw in ws:
-                        if self._stop.is_set():
+                    while not self._stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(
+                                ws.recv(), timeout=_STALE_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                f"[scanner] {url[:60]}... sin datos en "
+                                f"{_STALE_SECONDS}s; reconectando"
+                            )
                             break
                         try:
-                            await handler(*self._parse(raw))
+                            stream, data = self._parse(raw)
+                            suffix = (
+                                stream.split("@", 1)[1]
+                                if "@" in stream else stream
+                            )
+                            self._stream_counts[suffix] = (
+                                self._stream_counts.get(suffix, 0) + 1
+                            )
+                            await handler(stream, data)
                         except Exception as exc:  # noqa: BLE001
                             self._record_error(exc)
             except asyncio.CancelledError:
@@ -234,7 +271,9 @@ class MarketScanner:
                 for t in data:
                     sym = t.get("s", "")
                     if sym in self._tracked:
-                        self._last_price[sym] = float(t.get("c") or 0.0)
+                        price = float(t.get("c") or 0.0)
+                        self._last_price[sym] = price
+                        self._engine.on_price(sym, price)
             elif stream.endswith("!forceOrder@arr"):
                 for o in data:
                     sym = o.get("s", "")
@@ -265,6 +304,8 @@ class MarketScanner:
                 bids = [(float(p), float(q)) for p, q in (data.get("b") or [])]
                 asks = [(float(p), float(q)) for p, q in (data.get("a") or [])]
                 self._engine.on_depth(sym, bids, asks)
+                if bids and asks:
+                    self._engine.on_price(sym, (bids[0][0] + asks[0][0]) / 2.0)
         finally:
             self._stats["events_processed"] += 1
         await self._maybe_evaluate(sym)
@@ -275,8 +316,21 @@ class MarketScanner:
             return
         self._eval_throttle[symbol] = now
         signal = self._engine.evaluate(symbol, now)
-        if signal is not None:
-            self._emit(signal)
+        if signal is None:
+            return
+
+        # Cooldown por símbolo+dirección: evita re-emitir la misma anomalía
+        # cada segundo mientras persista.
+        last = self._last_emit.get(symbol)
+        if last is not None:
+            last_ts, last_dir = last
+            if (
+                last_dir == signal.direction
+                and now - last_ts < self._cfg.signal_cooldown_seconds
+            ):
+                return
+        self._last_emit[symbol] = (now, signal.direction)
+        self._emit(signal)
 
     # ── Emisión / snapshot ───────────────────────────────
 
@@ -315,6 +369,8 @@ class MarketScanner:
                 reconnects=self._stats["reconnects"],
                 uptime_seconds=round(time.time() - self._started_at, 1),
                 last_error=self._stats["last_error"],
+                diagnostics=self._engine.diagnostics(),
+                stream_counts=dict(self._stream_counts),
             )
 
     # ── Helpers ──────────────────────────────────────────

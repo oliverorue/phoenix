@@ -9,13 +9,13 @@ Detecta señales que no son simples cruces de medias:
 - **Volume Delta** desde `@aggTrade`: diferencia entre volumen taker-buy y
   taker-sell en una ventana móvil, más un z-score de volumen total frente a
   su propia historia reciente (picos anómalos).
-- **Funding Rate extremo** (REST `premiumIndex`): funding muy positivo →
+- **Funding Rate extremo** (REST `futures_mark_price`): funding muy positivo →
   mercado sobreapalancado LONG (bias de reversión SHORT) y viceversa.
 - **Liquidaciones en cascada** (`!forceOrder@arr`): ráfaga de órdenes de
   liquidación por encima de un nocional mínimo en una ventana corta.
 
-Todo el estado por símbolo está acotado con ``deque(maxlen=...)`` para que un
-universo grande no haga crecer la memoria.
+Todo el estado por símbolo está acotado con ``deque(maxlen=...)`` y expone
+contadores de diagnóstico para saber qué condición se está disparando (o no).
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ from bot.scanner.models import Direction, Signal
 class _SymbolState:
     """Estado móvil acotado de un único símbolo."""
 
-    trades: deque = field(default_factory=lambda: deque(maxlen=300))  # (ts, qty, is_buy)
-    window_totals: deque = field(default_factory=lambda: deque(maxlen=120))  # suma por ventana
+    trades: deque = field(default_factory=lambda: deque(maxlen=2000))  # (ts, qty, is_buy)
+    window_totals: deque = field(default_factory=lambda: deque(maxlen=120))  # volumen por ventana
     obi: float = 0.0
     funding: float = 0.0
     liquidations: deque = field(default_factory=lambda: deque(maxlen=200))  # (ts, side, notional)
@@ -48,6 +48,11 @@ class AnomalyEngine:
     def __init__(self, config: ScannerConfig) -> None:
         self._cfg = config
         self._states: dict[str, _SymbolState] = {}
+        self._diag = {
+            "evals": 0, "agg": 0, "depth": 0, "funding": 0, "force": 0,
+            "obi_hits": 0, "delta_hits": 0, "spike_hits": 0,
+            "funding_hits": 0, "cascade_hits": 0,
+        }
 
     # ── Estado acotado ──────────────────────────────────
 
@@ -65,6 +70,7 @@ class AnomalyEngine:
         state = self._state(symbol)
         state.trades.append((ts, qty, not is_buyer_maker))  # is_buy = taker compra
         state.last_price = price
+        self._diag["agg"] += 1
 
     def on_depth(self, symbol: str, bids: list[tuple[float, float]],
                  asks: list[tuple[float, float]]) -> None:
@@ -73,24 +79,31 @@ class AnomalyEngine:
         ask_sum = sum(q for _p, q in asks) if asks else 0.0
         total = bid_sum + ask_sum
         state.obi = (bid_sum - ask_sum) / total if total > 0 else 0.0
+        self._diag["depth"] += 1
+
+    def on_price(self, symbol: str, price: float) -> None:
+        """Setea el último precio desde miniTicker o el mid del book."""
+        if price > 0:
+            self._state(symbol).last_price = price
 
     def on_funding(self, symbol: str, rate: float) -> None:
         self._state(symbol).funding = rate
+        self._diag["funding"] += 1
 
     def on_force_order(self, symbol: str, ts: float, side: str,
                        notional: float) -> None:
         self._state(symbol).liquidations.append((ts, side, notional))
+        self._diag["force"] += 1
 
     # ── Detección ───────────────────────────────────────
 
     def _volume_delta(self, state: _SymbolState, now: float) -> tuple[float, float]:
-        """(delta normalizado, z_score del volumen total) en la ventana móvil."""
-        window_seconds = self._cfg.liq_cascade_window_seconds  # reusamos ventana
-        trades = [t for t in state.trades if now - t[0] <= window_seconds]
-        if not trades:
-            return 0.0, 0.0
-        buy = sum(q for _ts, q, is_buy in trades if is_buy)
-        sell = sum(q for _ts, q, is_buy in trades if not is_buy)
+        """(delta normalizado, volumen total) en la ventana móvil (time-based)."""
+        window = self._cfg.volume_delta_window_seconds
+        while state.trades and now - state.trades[0][0] > window:
+            state.trades.popleft()
+        buy = sum(q for _ts, q, is_buy in state.trades if is_buy)
+        sell = sum(q for _ts, q, is_buy in state.trades if not is_buy)
         total = buy + sell
         delta = (buy - sell) / total if total > 0 else 0.0
         return delta, total
@@ -127,6 +140,7 @@ class AnomalyEngine:
         """Combina las señales disponibles en una tarjeta direccional."""
         now = now if now is not None else time.time()
         state = self._state(symbol)
+        self._diag["evals"] += 1
         if state.last_price <= 0:
             return None
 
@@ -134,40 +148,41 @@ class AnomalyEngine:
         score = 0.0
         weight = 0.0
 
-        # 1) Volume delta + spike
+        # 1) Volume delta (direccional) + spike (magnitud)
         delta, total = self._volume_delta(state, now)
         zscore = self._volume_zscore(state, total)
-        if total > 0 and (abs(delta) > 0.3 or zscore >= self._cfg.volume_zscore):
+        directional = abs(delta) >= self._cfg.delta_extreme
+        spike = zscore >= self._cfg.volume_zscore
+
+        if directional:
+            self._diag["delta_hits"] += 1
             w = 0.25
             weight += w
-            if delta > 0:
-                score += w
-                reasons.append(f"Compra agresiva (delta {delta:+.2f})")
-            else:
-                score += -w
-                reasons.append(f"Venta agresiva (delta {delta:+.2f})")
-            if zscore >= self._cfg.volume_zscore:
-                weight += 0.15
-                reasons.append(f"Pico de volumen (z={zscore:.1f})")
-                if delta > 0:
-                    score += 0.15
-                else:
-                    score += -0.15
+            score += w if delta > 0 else -w
+            reasons.append(
+                f"{'Compra' if delta > 0 else 'Venta'} agresiva (delta {delta:+.2f})"
+            )
+        if spike:
+            self._diag["spike_hits"] += 1
+            w = 0.15
+            weight += w
+            # El spike solo sesga la dirección si el delta también es extremo.
+            if directional:
+                score += w if delta > 0 else -w
+            reasons.append(f"Pico de volumen (z={zscore:.1f})")
 
         # 2) Order book imbalance
         obi = state.obi
         if abs(obi) >= self._cfg.obi_extreme:
+            self._diag["obi_hits"] += 1
             w = 0.30
             weight += w
-            if obi > 0:
-                score += w
-                reasons.append(f"OBI alcista ({obi:+.2f})")
-            else:
-                score += -w
-                reasons.append(f"OBI bajista ({obi:+.2f})")
+            score += w if obi > 0 else -w
+            reasons.append(f"OBI {'alcista' if obi > 0 else 'bajista'} ({obi:+.2f})")
 
         # 3) Funding extremo (reversión)
         if abs(state.funding) >= self._cfg.funding_extreme:
+            self._diag["funding_hits"] += 1
             w = 0.15
             weight += w
             if state.funding > 0:
@@ -180,6 +195,7 @@ class AnomalyEngine:
         # 4) Cascada de liquidaciones
         cascade = self._liquidation_cascade(state, now)
         if cascade is not None:
+            self._diag["cascade_hits"] += 1
             w = 0.30
             weight += w
             if cascade == "LONG":
@@ -214,6 +230,10 @@ class AnomalyEngine:
                 "norm_score": round(norm, 3),
             },
         )
+
+    def diagnostics(self) -> dict[str, int]:
+        """Contadores para ver qué condición se dispara (o no)."""
+        return dict(self._diag)
 
     def reset_symbol(self, symbol: str) -> None:
         self._states.pop(symbol, None)

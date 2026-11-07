@@ -65,6 +65,20 @@ def test_no_signal_without_data():
     assert engine.evaluate("XRPUSDT", T) is None
 
 
+def test_diagnostics_counters_increment():
+    engine = AnomalyEngine(ScannerConfig())
+    engine.on_agg_trade("XRPUSDT", T, 1.0, 1.0, False)
+    engine.on_depth("XRPUSDT", [(1.0, 1.0)], [(1.0, 1.0)])
+    engine.on_funding("XRPUSDT", 0.0)
+    engine.on_force_order("XRPUSDT", T, "SELL", 1.0)
+
+    d = engine.diagnostics()
+    assert d["agg"] == 1
+    assert d["depth"] == 1
+    assert d["funding"] == 1
+    assert d["force"] == 1
+
+
 def test_risk_engine_scales_with_confidence():
     risk = RiskEngine(base_risk_pct=0.01)
     high = Signal(symbol="XRPUSDT", direction="LONG", confidence=1.0, price=1.0)
