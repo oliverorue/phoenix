@@ -3,12 +3,6 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Any
 
-class SymbolConfig(BaseModel):
-    symbol: str = Field(..., pattern=r'^[A-Z]{2,}USDT$')
-    allocation_pct: float = Field(..., ge=0.01, le=1.0)
-    leverage: int = Field(default=1, ge=1, le=5)
-    risk_per_trade: float = Field(default=0.02, ge=0.001, le=0.1)
-    active: bool = True
 
 class PhaseConfig(BaseModel):
     balance_min: float = Field(ge=0)

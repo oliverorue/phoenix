@@ -1,38 +1,13 @@
 # ── Modo de ejecución ───────────────────────────────────
 # true → solo monitor de señales; NUNCA envía órdenes.
 monitor_only: true
-api:
-  circuit_breaker_cooldown_min: 15
-  circuit_breaker_max_failures: 5
-  instrument_cache_ttl: 3600
-  retry_base_delay: 1.0
-  retry_max: 3
-  retry_max_delay: 30.0
-dashboard:
-  bot_emoji: 🔥
-  bot_name: 🔥 PHOENIX SCALPER
-  bot_version: v5.1-50USD
-  host: 0.0.0.0
-  port: 8502
+
 # ── Exchange ────────────────────────────────────────────
 exchange:
   name: binance
-  # Fuente principal del modo testnet/mainnet.
-  # Si TESTNET está definido en secrets.env, debe coincidir con este valor.
-  testnet: true               # CAMBIA A false CUANDO QUIERAS MAINNET
-  # ⚠️ NUNCA CAMBIES A MAINNET SIN HACER PAPER TRADING PRIMERO.
-  # Para mainnet real también se exige LIVE_TRADING_CONFIRMED=true.
-execution:
-  loop_sleep_no_position: 120   # 2 min sin posición (ahorra rate limit)
-  loop_sleep_position: 30       # 30s con posición abierta
-# ── Paper Trading (OBLIGATORIO probar antes de mainnet) ─
-paper_trading:
-  enabled: true                 # LEGACY: ignorado en modo monitor-only
-  initial_balance: 50           # tu capital real
-  slippage_pct: 0.0005          # 0.05% slippage (XRP es líquido)
-  commission_pct: 0.0005        # 0.05% taker fee Binance
-  maker_commission_pct: 0.0001  # 0.01% maker fee Binance
-# ── Monitor (SOLO señales; NO ejecuta órdenes) ───────────
+  testnet: true
+
+# ── Monitor de 1 símbolo (solo lectura) ─────────────────
 monitor:
   enabled: true
   symbols:
@@ -46,6 +21,7 @@ monitor:
   notify: true                  # Telegram/Discord solo si están configurados
   session_only: false           # true → no avisar fuera de sesión/día permitido
   fee_pct: 0.0005               # Taker por lado (ida y vuelta = 2x)
+
 # ── Scanner global (radar async, solo lectura) ───────────
 scanner:
   use_mainnet: true             # datos públicos Mainnet
@@ -72,45 +48,37 @@ scanner:
   w_liquidity: 0.15
   w_freshness: 0.1
   freshness_halflife_seconds: 300
-indicators:
-  ma_periods:
-  - 5
-  - 10
-  - 20
-  rsi_period: 14
-  vol_ma_fast: 5
-  vol_ma_slow: 10
+
+# ── Market data (funding / open interest) ────────────────
 market_data:
   funding_rate:
     enabled: true
     extreme_high: 0.01
     extreme_low: -0.01
   open_interest:
-    change_threshold_pct: 15.0
     enabled: false
-# ── FASES DE ESCALAMIENTO ────────────────────────────────
-# CALIBRADAS PARA CAPITAL MÍNIMO DE $50
-# XRPUSDT es el ÚNICO símbolo viable con este capital
+
+# ── FASES DE ESCALAMIENTO (estrategia legacy del monitor) ─
 phases:
   0:
     balance_max: 100
     balance_min: 0
-    breakeven_trigger: 0.45       # 45% hacia TP1 (más selectivo, evita micro-pérdidas)
+    breakeven_trigger: 0.45
     descripcion: 💎 FASE 0 [$50-100] | tp1_rr=2.0 tp2_rr=3.0 | risk=0.6%
     lateral_adx_min: 22
     lateral_ma_distance: 0.005
-    leverage: 1                    # SIN apalancamiento para $50
-    max_dd_daily: 0.03             # 3% de DD diario máximo
+    leverage: 1
+    max_dd_daily: 0.03
     max_dd_weekly: 0.08
     max_dd_monthly: 0.12
-    max_consecutive_losses: 2      # MÁXIMO 2 pérdidas seguidas
-    max_sl_pct: 0.040              # SL máximo 4% (XRP rara vez mueve más)
-    max_stops_day: 2               # Solo 2 stops al día
-    max_volatility_pct: 12.0       # Filtro de volatilidad alta
-    risk_per_trade: 0.006          # 0.6% de riesgo por trade (MUY conservador)
+    max_consecutive_losses: 2
+    max_sl_pct: 0.040
+    max_stops_day: 2
+    max_volatility_pct: 12.0
+    risk_per_trade: 0.006
     rsi_max_long: 38
     rsi_max_short: 75
-    rsi_min_long: 22               # RSI más extremo para mejor entrada
+    rsi_min_long: 22
     rsi_min_short: 68
     breakeven_trigger_short: 0.25
     dias_excluir:
@@ -119,8 +87,8 @@ phases:
     sesion_inicio: 17
     sl_buffer: 0.0005
     tp1_porcentaje: 0.65
-    tp1_rr: 2.0                    # ↑ MEJORADO desde 1.5 (mejor RR)
-    tp2_rr: 3.0                    # ↑ MEJORADO desde 2.5
+    tp1_rr: 2.0
+    tp2_rr: 3.0
     trailing_dist: 0.004
   1:
     balance_max: 200
@@ -183,7 +151,7 @@ phases:
     descripcion: 🔵 FASE 3 [$500-1500] | tp1_rr=1.8 tp2_rr=3.0 | risk=1.2%
     lateral_adx_min: 22
     lateral_ma_distance: 0.004
-    leverage: 2                    # Apalancamiento moderado desde $500
+    leverage: 2
     max_dd_daily: 0.04
     max_dd_weekly: 0.10
     max_dd_monthly: 0.18
@@ -230,122 +198,18 @@ phases:
     tp1_rr: 1.5
     tp2_rr: 3.0
     trailing_dist: 0.002
-# ── Portfolio ───────────────────────────────────────────
-portfolio:
-  spread_max_default: 0.15
-  # Grupos de correlación (solo XRPUSDT activo)
-  correlation_groups:
-    - name: "altcoins"
-      symbols: ["XRPUSDT"]
-      max_concurrent: 1
-  symbols:
-  - active: true
-    allocation_pct: 1.0            # 100% del capital en XRP
-    leverage: 1
-    risk_per_trade: 0.006
-    spread_max: 0.15
-    symbol: XRPUSDT
-  # ⚠️ ETHUSDT Y DOGEUSDT DESACTIVADOS: no son viables con $50
-  # - active: false
-  #   allocation_pct: 0.0
-  #   symbol: ETHUSDT
-  # - active: false
-  #   allocation_pct: 0.0
-  #   symbol: DOGEUSDT
-# ── Portfolio Risk ──────────────────────────────────────
-portfolio_risk:
-  enabled: true
-  var_confidence: 0.95
-  var_lookback_days: 30
-  max_exposure_usdt: 50            # Límite = tu capital total
-  max_exposure_pct: 100            # 100% del balance
-# ── Kelly Sizing ────────────────────────────────────────
-kelly_sizing:
-  enabled: true
-  window_size: 20
-  min_trades: 5
-  max_multiplier: 1.3              # Techo reducido para $50
-  min_multiplier: 0.4
-  fractional: 0.20                 # 20% de Kelly (más conservador)
-  streak_boost: 0.03               # +3% por win consecutivo
-  streak_penalty: 0.10             # -10% por loss consecutivo
-  max_streak_boost: 0.15           # +15% máximo por racha
-  conservative_tier_threshold: 30  # Menos trades para salir de bootstrap
-  conservative_max_multiplier: 1.1 # Techo de bootstrap
-# ── Secrets Manager ─────────────────────────────────────
-secrets:
-  required_keys:
-    - BINANCE_API_KEY
-    - BINANCE_API_SECRET
-    - TELEGRAM_TOKEN
-    - TELEGRAM_CHAT_ID
-    - DISCORD_WEBHOOK
-  vault:
-    enabled: false
-    url: ""
-    path: secret/data/trading-bot
-    mount: secret
-    ttl: 300
-  enc_file: config/secrets.env.enc
-  enc_key_env: SECRETS_ENCRYPTION_KEY
-# ── Graceful Shutdown ───────────────────────────────────
-shutdown:
-  timeout: 30
-  close_positions: true
-  notify: true
-# ── Métricas ────────────────────────────────────────────
-metrics:
-  enabled: true
-  port: 8000
-  json_path: data/metrics.json
-# ── Tracing ─────────────────────────────────────────────
-tracing:
-  # Deshabilitado por defecto para no inundar stdout con spans.
-  # Para habilitar: exporter: otlp + otlp_endpoint.
-  enabled: false
-  exporter: otlp
-  otlp_endpoint: ""
-  sampling_rate: 1.0
+
+# ── Rate limiter (para REST) ─────────────────────────────
 rate_limiter:
   enabled: true
   max_tokens: 10.0
   tokens_per_second: 5.0
-supported_coins:
-  XRPUSDT:
-    description: ✅ ÚNICO VIABLE CON $50 | Buena liquidez, movimientos claros
-    name: XRP
-    recommended_leverage: 1
-    volatility: Media-Alta
-  # Los demás símbolos requieren $200+ para ser rentables
-  ETHUSDT:
-    description: ⚠️ REQUIERE $200+ | Comisiones altas para capital pequeño
-    name: Ethereum
-    recommended_leverage: 2
-    volatility: Media
-  DOGEUSDT:
-    description: ⚠️ REQUIERE $200+ | Demasiado volátil para $50
-    name: Dogecoin
-    recommended_leverage: 1
-    volatility: Alta
-  SOLUSDT:
-    description: ❌ REQUIERE $500+ | Muy riesgoso
-    name: Solana
-    recommended_leverage: 1
-    volatility: Muy Alta
-symbol: XRPUSDT
+
 timeframes:
   entry: '15'
   limit_entry: 30
   limit_primary: 30
   primary: '60'
+
 timezone: America/Asuncion
-websocket:
-  # Deshabilitado hasta integrar los buffers WS en SymbolRunner.
-  # El camino REST ya está normalizado y es el usado actualmente.
-  enabled: false
-  kline_intervals:
-  - 15
-  - 60
-  orderbook:
-    enabled: true
-    depth: 50
+symbol: XRPUSDT
