@@ -16,6 +16,7 @@ Fases del shutdown:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import signal
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -221,7 +222,7 @@ class GracefulShutdown:
 
         open_positions = [
             r for r in bot.runners
-            if hasattr(r, "position") and r.position is not None
+            if getattr(getattr(r, "executor", None), "position_open", False)
         ]
         if not open_positions:
             logger.info("📭 Sin posiciones abiertas para cerrar")
@@ -230,11 +231,27 @@ class GracefulShutdown:
         logger.info(f"🔒 Cerrando {len(open_positions)} posición(es) abierta(s)...")
         for runner in open_positions:
             symbol = runner.symbol if hasattr(runner, "symbol") else "?"
+            executor = getattr(runner, "executor", None)
             try:
-                if hasattr(runner, "executor") and hasattr(runner.executor, "close_position"):
-                    # Usar asyncio.shield para proteger contra cancelación
-                    await asyncio.shield(runner.executor.close_position())
+                if executor is None:
+                    continue
+                close_async = getattr(executor, "close_position_async", None)
+                if callable(close_async):
+                    result = close_async(reason="shutdown")
+                    if inspect.isawaitable(result):
+                        ok = await asyncio.shield(result)
+                    else:
+                        ok = bool(result)
+                else:
+                    result = executor.close_position()
+                    if hasattr(result, "__await__"):
+                        ok = await asyncio.shield(result)
+                    else:
+                        ok = True
+                if ok:
                     logger.info(f"🔒 Posición cerrada: {symbol}")
+                else:
+                    logger.error(f"❌ No se pudo cerrar la posición {symbol}")
             except asyncio.CancelledError:
                 logger.warning(f"⚠️ Cancelado cierre de posición {symbol}")
                 break

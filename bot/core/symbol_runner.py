@@ -30,7 +30,10 @@ class SymbolRunner:
         self.strategy = strategy or ScalpingStrategy()
         self.risk_mgr = risk_mgr or RiskManager(self.data_feed)
         self.executor = executor or OrderExecutor(self.data_feed, journal)
-        self.position_mgr = position_mgr or PositionManager(self.executor, self.data_feed)
+        self.position_mgr = position_mgr or PositionManager(
+            self.executor, self.data_feed,
+            balance_getter=lambda: self.balance,
+        )
 
         # Market Data Provider (on-chain / funding rate) — inyectable
         if market_data is not None:

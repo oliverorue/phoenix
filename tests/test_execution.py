@@ -214,3 +214,137 @@ class TestOrderExecutor:
         assert result == False
         assert executor.position_open == False
         assert executor.quantity == 0.0
+
+
+class TestPhase3Execution:
+    @pytest.fixture
+    def mock_client(self):
+        client = MagicMock()
+        client.place_market_order = AsyncMock(
+            return_value={"orderId": "o1", "executedQty": "100", "avgPrice": "0.50"}
+        )
+        client.place_limit_order = AsyncMock(return_value={"orderId": "tp"})
+        client.get_positions = AsyncMock(
+            return_value=[{"size": 100.0, "side": "LONG", "avgPrice": 0.50}]
+        )
+        client.get_open_orders = AsyncMock(return_value=[])
+        client.set_stop_loss = AsyncMock(return_value={"orderId": "sl"})
+        client.update_stop_loss = AsyncMock(return_value={"orderId": "sl2"})
+        client.cancel_order = AsyncMock(return_value={})
+        return client
+
+    @pytest.fixture
+    def data_feed(self):
+        feed = MagicMock()
+        feed.get_balance = AsyncMock(return_value=200.0)
+        feed.symbol = "XRPUSDT"
+        feed._instrument_cache = {"qtyStep": 1.0}
+        return feed
+
+    @pytest.fixture
+    def executor(self, data_feed, mock_client):
+        ex = OrderExecutor(data_feed)
+        ex.client = mock_client
+        ex._qty_step = 1.0
+        return ex
+
+    @pytest.mark.asyncio
+    async def test_open_uses_actual_fill(self, executor, mock_client):
+        mock_client.place_market_order.return_value = {
+            "orderId": "o1", "executedQty": "97", "avgPrice": "0.5012",
+        }
+        mock_client.get_positions.return_value = [
+            {"size": 97.0, "side": "LONG", "avgPrice": 0.5012}
+        ]
+
+        ok = await executor.open_position(
+            "LONG", 0.50, 0.495, 0.51, 0.52, 100.0,
+        )
+
+        assert ok is True
+        assert executor.entry_price == pytest.approx(0.5012)
+        assert executor.quantity == pytest.approx(97.0)
+
+    @pytest.mark.asyncio
+    async def test_open_passes_unique_client_order_id(self, executor, mock_client):
+        await executor.open_position("LONG", 0.50, 0.495, 0.51, 0.52, 100.0)
+
+        kwargs = mock_client.place_market_order.call_args.kwargs
+        assert kwargs["client_order_id"].startswith(executor._client_id_prefix)
+        assert mock_client.set_stop_loss.call_args.kwargs["client_order_id"]
+
+    @pytest.mark.asyncio
+    async def test_close_uses_remaining_quantity_and_reduce_only(
+        self, executor, mock_client
+    ):
+        executor.position_open = True
+        executor.position_type = "LONG"
+        executor.entry_price = 0.50
+        executor.quantity = 35.0  # remanente tras TP1
+        executor.tp1_hit = True
+        executor.last_price = 0.52
+
+        await executor._close_position_async()
+
+        args, kwargs = mock_client.place_market_order.call_args
+        assert args == ("XRPUSDT", "SELL", 35.0)
+        assert kwargs["reduce_only"] is True
+
+    @pytest.mark.asyncio
+    async def test_sync_detects_tp1_partial_fill(self, executor, mock_client):
+        executor.position_open = True
+        executor.position_type = "LONG"
+        executor.entry_price = 0.50
+        executor.quantity = 100.0
+        executor.tp1_price = 0.51
+        executor.tp1_hit = False
+        executor.journal = MagicMock()
+        executor.journal._open_trade = {"qty": 100.0}
+        mock_client.get_positions.return_value = [
+            {"size": 35.0, "side": "LONG", "avgPrice": 0.50}
+        ]
+
+        result = await executor.sync_position_from_exchange()
+
+        assert result["filled"] == pytest.approx(65.0)
+        assert executor.quantity == pytest.approx(35.0)
+        assert executor.tp1_hit is True
+        assert executor.journal._open_trade["tp1_hit"] is True
+
+    @pytest.mark.asyncio
+    async def test_sync_detects_sl_external_close(self, executor, mock_client):
+        executor.position_open = True
+        executor.position_type = "LONG"
+        executor.entry_price = 0.50
+        executor.quantity = 100.0
+        executor.current_sl = 0.495
+        executor.last_price = 0.494
+        executor.journal = MagicMock()
+        executor.journal._open_trade = {}
+        mock_client.get_positions.return_value = []
+
+        result = await executor.sync_position_from_exchange()
+
+        assert result["closed"] is True
+        assert result["reason"] == "stop_loss"
+        assert executor.position_open is False
+        assert executor.unreported_close is True
+        assert executor.last_close_pnl < 0
+
+    @pytest.mark.asyncio
+    async def test_cancel_limit_orders_only_cancels_bot_orders(
+        self, executor, mock_client
+    ):
+        executor.position_open = True
+        executor.position_type = "LONG"
+        own = f"{executor._client_id_prefix}tp1"
+        mock_client.get_open_orders.return_value = [
+            {"orderId": "own", "type": "LIMIT", "reduceOnly": True,
+             "clientOrderId": own},
+            {"orderId": "other", "type": "LIMIT", "reduceOnly": True,
+             "clientOrderId": "manual"},
+        ]
+
+        await executor._cancel_limit_orders()
+
+        mock_client.cancel_order.assert_awaited_once_with("XRPUSDT", "own")

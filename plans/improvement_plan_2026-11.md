@@ -715,4 +715,21 @@ Si no se respeta ese orden, cualquier resultado —paper, backtest u optimizaci�
 - [x] VaR usa retornos con signo, no `abs()`.
 - [x] Tests nuevos de balance, drawdown, stops, sesión, RR, cooldown y VaR.
 
-**Siguiente:** Fase 3 — ejecución y gestión de posición (fills reales, TP1/TP2, SL, trailing, shutdown).
+### Fase 3 — Completada (2026-11-07)
+
+- [x] `open_position` usa `avgPrice` y `executedQty` reales del fill.
+- [x] `newClientOrderId` único en entrada, SL, TPs y cierres.
+- [x] Reintentos de market order verifican posición antes de duplicar.
+- [x] `sync_position_from_exchange()` detecta TP1 parcial y cierres SL/TP.
+- [x] `quantity` se reduce al remanente real tras TP1.
+- [x] El cierre usa la cantidad remanente y `reduceOnly=True`.
+- [x] `_cancel_limit_orders()` cancela solo órdenes creadas por este bot.
+- [x] Trailing stop real: mueve el SL detrás del extremo, sin precio de activación invertido.
+- [x] TP1 se marca solo con fill confirmado, no por tocar precio.
+- [x] Shutdown detecta `executor.position_open` y espera `close_position_async()`.
+- [x] Recuperación ya no cancela el SL; repone SL/TPs faltantes.
+- [x] Recuperación no resucita posiciones desde JSON viejo.
+- [x] Si hay posición sin SL conocido, se cierra por seguridad.
+- [x] Tests de fills, TP parcial, cierre remanente, trailing, shutdown y recuperación.
+
+**Siguiente:** Fase 4 — paridad de paper trading (SL/TP2/parciales/trailing simulados).

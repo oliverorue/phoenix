@@ -251,14 +251,16 @@ class TestShutdownClosePositions:
         cfg = ShutdownConfig(timeout=5.0, close_positions=True, notify=False)
         runner = MagicMock()
         runner.symbol = "XRPUSDT"
-        runner.position = {"side": "Buy", "qty": 10}
-        runner.executor.close_position = AsyncMock()
+        runner.executor.position_open = True
+        runner.executor.close_position_async = AsyncMock(return_value=True)
         mock_bot.runners = [runner]
 
         gs = GracefulShutdown(bot=mock_bot, stop_event=stop_event, config=cfg)
         await gs.shutdown()
 
-        runner.executor.close_position.assert_awaited_once()
+        runner.executor.close_position_async.assert_awaited_once_with(
+            reason="shutdown"
+        )
 
     @pytest.mark.asyncio
     async def test_close_positions_skipped_when_disabled(
@@ -266,14 +268,13 @@ class TestShutdownClosePositions:
     ) -> None:
         cfg = ShutdownConfig(timeout=5.0, close_positions=False, notify=False)
         runner = MagicMock()
-        runner.position = {"side": "Buy", "qty": 10}
+        runner.executor.position_open = True
         mock_bot.runners = [runner]
 
         gs = GracefulShutdown(bot=mock_bot, stop_event=stop_event, config=cfg)
         await gs.shutdown()
 
-        # close_position no debe ser llamado
-        runner.executor.close_position.assert_not_called()
+        runner.executor.close_position_async.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_close_positions_no_open_positions(
@@ -281,13 +282,13 @@ class TestShutdownClosePositions:
     ) -> None:
         cfg = ShutdownConfig(timeout=5.0, close_positions=True, notify=False)
         runner = MagicMock()
-        runner.position = None  # sin posición
+        runner.executor.position_open = False
         mock_bot.runners = [runner]
 
         gs = GracefulShutdown(bot=mock_bot, stop_event=stop_event, config=cfg)
         await gs.shutdown()
 
-        runner.executor.close_position.assert_not_called()
+        runner.executor.close_position_async.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_close_positions_error_does_not_block(
@@ -297,14 +298,16 @@ class TestShutdownClosePositions:
         cfg = ShutdownConfig(timeout=5.0, close_positions=True, notify=False)
         runner = MagicMock()
         runner.symbol = "XRPUSDT"
-        runner.position = {"side": "Buy", "qty": 10}
-        runner.executor.close_position = AsyncMock(side_effect=RuntimeError("API error"))
+        runner.executor.position_open = True
+        runner.executor.close_position_async = AsyncMock(
+            side_effect=RuntimeError("API error")
+        )
         mock_bot.runners = [runner]
 
         gs = GracefulShutdown(bot=mock_bot, stop_event=stop_event, config=cfg)
         # No debe lanzar excepción
         await gs.shutdown()
-        runner.executor.close_position.assert_awaited_once()
+        runner.executor.close_position_async.assert_awaited_once()
 
 
 # ── Test Shutdown — Notify ───────────────────────────────────────────────────

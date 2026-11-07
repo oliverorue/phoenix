@@ -44,12 +44,15 @@ class ExchangeClient(Protocol):
     # ── Órdenes ─────────────────────────────────────────────────────
     async def place_market_order(
         self, symbol: str, side: str, qty: float,
+        reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         ...
 
     async def place_limit_order(
         self, symbol: str, side: str, qty: float, price: float,
         reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         ...
 
@@ -85,11 +88,13 @@ class ExchangeClient(Protocol):
     async def set_stop_loss(
         self, symbol: str, side: str, stop_price: float,
         qty: Optional[float] = None,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         ...
 
     async def update_stop_loss(
         self, symbol: str, side: str, stop_price: float,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         ...
 
@@ -278,6 +283,8 @@ class BinanceFuturesClient:
 
     async def place_market_order(
         self, symbol: str, side: str, qty: float,
+        reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Coloca una orden Market.
 
@@ -306,13 +313,20 @@ class BinanceFuturesClient:
         await self._ensure_instrument_cache(sym)
         qty_str = self._format_quantity(sym, qty)
 
+        params: dict[str, Any] = {
+            "symbol": sym,
+            "side": side,
+            "type": "MARKET",
+            "quantity": qty_str,
+        }
+        if reduce_only:
+            params["reduceOnly"] = "true"
+        if client_order_id:
+            params["newClientOrderId"] = client_order_id
+
         try:
             return await asyncio.to_thread(
-                self._rest.futures_create_order,
-                symbol=sym,
-                side=side,
-                type="MARKET",
-                quantity=qty_str,
+                self._rest.futures_create_order, **params,
             )
         except BinanceAPIException as exc:
             raise self._resolve_error(
@@ -326,6 +340,7 @@ class BinanceFuturesClient:
     async def place_limit_order(
         self, symbol: str, side: str, qty: float, price: float,
         reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Coloca una orden Limit (GTC).
 
@@ -358,16 +373,21 @@ class BinanceFuturesClient:
         await self._ensure_instrument_cache(sym)
         qty_str = self._format_quantity(sym, qty)
 
+        params: dict[str, Any] = {
+            "symbol": sym,
+            "side": side,
+            "type": "LIMIT",
+            "timeInForce": "GTC",
+            "quantity": qty_str,
+            "price": f"{price:.8f}",
+            "reduceOnly": "true" if reduce_only else "false",
+        }
+        if client_order_id:
+            params["newClientOrderId"] = client_order_id
+
         try:
             return await asyncio.to_thread(
-                self._rest.futures_create_order,
-                symbol=sym,
-                side=side,
-                type="LIMIT",
-                timeInForce="GTC",
-                quantity=qty_str,
-                price=f"{price:.8f}",
-                reduceOnly="true" if reduce_only else "false",
+                self._rest.futures_create_order, **params,
             )
         except BinanceAPIException as exc:
             raise self._resolve_error(
@@ -613,6 +633,7 @@ class BinanceFuturesClient:
     async def set_stop_loss(
         self, symbol: str, side: str, stop_price: float,
         qty: Optional[float] = None,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Establece un Stop Loss usando ``STOP_MARKET``.
 
@@ -643,27 +664,24 @@ class BinanceFuturesClient:
         opposite_side = "SELL" if side.upper() == "LONG" else "BUY"
 
         try:
+            params: dict[str, Any] = {
+                "symbol": sym,
+                "side": opposite_side,
+                "type": "STOP_MARKET",
+                "stopPrice": f"{stop_price:.8f}",
+            }
             if qty is not None:
                 await self._ensure_instrument_cache(sym)
-                qty_str = self._format_quantity(sym, qty)
-                result = await asyncio.to_thread(
-                    self._rest.futures_create_order,
-                    symbol=sym,
-                    side=opposite_side,
-                    type="STOP_MARKET",
-                    stopPrice=f"{stop_price:.8f}",
-                    quantity=qty_str,
-                    reduceOnly="true",
-                )
+                params["quantity"] = self._format_quantity(sym, qty)
+                params["reduceOnly"] = "true"
             else:
-                result = await asyncio.to_thread(
-                    self._rest.futures_create_order,
-                    symbol=sym,
-                    side=opposite_side,
-                    type="STOP_MARKET",
-                    stopPrice=f"{stop_price:.8f}",
-                    closePosition="true",
-                )
+                params["closePosition"] = "true"
+            if client_order_id:
+                params["newClientOrderId"] = client_order_id
+
+            result = await asyncio.to_thread(
+                self._rest.futures_create_order, **params,
+            )
 
             logger.info(
                 "SL set for {} at {} (side={})", sym, stop_price, opposite_side,
@@ -680,6 +698,7 @@ class BinanceFuturesClient:
 
     async def update_stop_loss(
         self, symbol: str, side: str, stop_price: float,
+        client_order_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Actualiza un Stop Loss cancelando el anterior y creando uno nuevo.
 
@@ -728,7 +747,9 @@ class BinanceFuturesClient:
                         )
 
             # 2. Crear nuevo SL
-            return await self.set_stop_loss(sym, side, stop_price)
+            return await self.set_stop_loss(
+                sym, side, stop_price, client_order_id=client_order_id,
+            )
         except BinanceAPIException as exc:
             raise self._resolve_error(
                 exc, f"update_stop_loss({sym}, {side}, stop={stop_price})",

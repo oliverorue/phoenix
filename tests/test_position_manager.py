@@ -18,6 +18,7 @@ class TestPositionManager:
         exec.trailing_activated = False
         exec.journal = MagicMock()
         exec.journal._open_trade = {}
+        exec.sync_position_from_exchange = AsyncMock(return_value=None)
         return exec
 
     @pytest.fixture
@@ -36,13 +37,13 @@ class TestPositionManager:
         return mgr
 
     @pytest.mark.asyncio
-    async def test_tp1_hit_activates_trailing(self, position_mgr, mock_executor):
-        """Cuando el precio alcanza TP1, se marca tp1_hit y se activa trailing stop."""
+    async def test_tp1_fill_activates_trailing(self, position_mgr, mock_executor):
+        """Cuando TP1 ya tiene fill, se mueve breakeven y se activa trailing."""
+        mock_executor.tp1_hit = True
         df = pd.DataFrame()
         await position_mgr.update(current_price=1.05, df_15m=df, df_1h=df)
-        assert mock_executor.tp1_hit == True
-        mock_executor.activate_trailing_stop.assert_called_once()
-        mock_executor.update_stop_loss.assert_called_with(1.0008)  # breakeven + offset
+        assert mock_executor.trailing_activated is True
+        mock_executor.update_stop_loss.assert_any_call(1.0008)
 
     @pytest.mark.asyncio
     async def test_tp1_reached_long(self, position_mgr, mock_executor):
@@ -67,8 +68,9 @@ class TestPositionManager:
         position_mgr.risk_phase_config = AsyncMock(return_value=(0, {'breakeven_trigger': 0.4, 'trailing_dist': 0.001}))
         df = pd.DataFrame()
         await position_mgr.update(current_price=1.02, df_15m=df, df_1h=df)
-        assert mock_executor.tp1_hit is True
-        mock_executor.update_stop_loss.assert_called_with(1.0008)  # breakeven + offset
+        # Breakeven temprano NO marca TP1 como ejecutado.
+        assert mock_executor.tp1_hit is False
+        mock_executor.update_stop_loss.assert_called_with(1.0008)
 
     @pytest.mark.asyncio
     async def test_breakeven_early_not_triggered(self, position_mgr, mock_executor):
@@ -137,9 +139,10 @@ class TestPositionManager:
         assert isinstance(fase, int)
 
     @pytest.mark.asyncio
-    async def test_tp1_already_hit_does_not_call_update_stop_loss(self, position_mgr, mock_executor):
-        """Si tp1_hit ya es True, no debe volver a llamar update_stop_loss."""
+    async def test_tp1_fill_does_not_lower_existing_sl(self, position_mgr, mock_executor):
+        """Si el SL ya está mejor que breakeven/trailing, no se mueve hacia atrás."""
         mock_executor.tp1_hit = True
+        mock_executor.current_sl = 1.10
         df = pd.DataFrame()
         await position_mgr.update(current_price=1.05, df_15m=df, df_1h=df)
         mock_executor.update_stop_loss.assert_not_called()
@@ -162,3 +165,37 @@ class TestPositionManager:
             result = await position_mgr.update(current_price=1.00, df_15m=df, df_1h=df)
             assert result == "close_reversal"
             mock_executor.close_position.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_tp1_price_touch_without_fill_does_not_mark(
+        self, position_mgr, mock_executor
+    ):
+        """Tocar TP1 no es un fill: no se marca tp1_hit."""
+        position_mgr.risk_phase_config = AsyncMock(
+            return_value=(0, {"breakeven_trigger": 10.0, "trailing_dist": 0.001})
+        )
+        mock_executor.tp1_hit = False
+        await position_mgr.update(
+            current_price=1.06, df_15m=pd.DataFrame(), df_1h=pd.DataFrame()
+        )
+        assert mock_executor.tp1_hit is False
+        assert mock_executor.trailing_activated is False
+
+    @pytest.mark.asyncio
+    async def test_trailing_moves_sl_with_price(self, position_mgr, mock_executor):
+        """El trailing mueve el SL detrás del extremo alcanzado."""
+        mock_executor.tp1_hit = True
+        mock_executor.trailing_activated = False
+        mock_executor.current_sl = 1.0008
+        position_mgr._breakeven_done = True
+        position_mgr.risk_phase_config = AsyncMock(
+            return_value=(0, {"trailing_dist": 0.001})
+        )
+
+        await position_mgr.update(
+            current_price=1.05, df_15m=pd.DataFrame(), df_1h=pd.DataFrame()
+        )
+
+        assert mock_executor.trailing_activated is True
+        mock_executor.update_stop_loss.assert_called_with(
+            pytest.approx(1.05 * 0.999)
+        )
