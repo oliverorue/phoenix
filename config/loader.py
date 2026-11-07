@@ -94,6 +94,9 @@ PAPER_MAKER_COMMISSION_PCT: float = float(PAPER_TRADING_CFG.get("maker_commissio
 # ── 4a. Monitor de señales (solo lectura, sin ejecución) ──────
 MONITOR_CFG: Dict[str, Any] = _settings.get("monitor", {})
 
+# ── 4a. Scanner global de mercado (radar async) ───────────────
+SCANNER_CFG: Dict[str, Any] = _settings.get("scanner", {})
+
 # ── 4a. Portfolio / Correlación ─────────────────────────────
 _PORTFOLIO_CFG: Dict[str, Any] = _settings.get("portfolio", {})
 CORRELATION_GROUPS: list[Dict[str, Any]] = _PORTFOLIO_CFG.get("correlation_groups", [])

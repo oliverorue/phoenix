@@ -46,6 +46,21 @@ monitor:
   notify: true                  # Telegram/Discord solo si están configurados
   session_only: false           # true → no avisar fuera de sesión/día permitido
   fee_pct: 0.0005               # Taker por lado (ida y vuelta = 2x)
+# ── Scanner global (radar async, solo lectura) ───────────
+scanner:
+  use_mainnet: true             # datos públicos Mainnet
+  min_quote_volume_24h: 5000000 # $5M volumen 24h mínimo (filtra basura)
+  max_symbols: 60               # techo del universo rastreado
+  symbols_per_shard: 50         # streams por socket combinado
+  depth_levels: 20              # 5 | 10 | 20 (niveles del book parcial)
+  depth_symbols_limit: 30       # solo top-N por volumen llevan depth
+  funding_poll_seconds: 60
+  signal_queue_maxlen: 200
+  obi_extreme: 0.6
+  volume_zscore: 3.0
+  funding_extreme: 0.0005
+  liq_cascade_min_events: 5
+  liq_cascade_min_notional: 2000000
 indicators:
   ma_periods:
   - 5

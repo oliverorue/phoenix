@@ -1044,8 +1044,8 @@ st.markdown("---")
 # TABS
 # ─────────────────────────────────────────────────────────────
 
-tab_icons = ["📊", "📋", "🧪", "⚙️", "📈", "💹", "⚙️"]
-tab_labels = ["Market", "Historial", "Backtest", "Optimizar", "Rendimiento", "Live P&L", "Diagnóstico"]
+tab_icons = ["📊", "📋", "🧪", "⚙️", "📈", "💹", "⚙️", "📡"]
+tab_labels = ["Market", "Historial", "Backtest", "Optimizar", "Rendimiento", "Live P&L", "Diagnóstico", "Radar"]
 tabs = st.tabs([f"{i} {l}" for i, l in zip(tab_icons, tab_labels)])
 
 # ═════════════════════════════════════════════════════════════
@@ -1789,6 +1789,15 @@ with tabs[6]:
                 st.rerun()
             else:
                 st.toast("❌ Error al reiniciar")
+
+
+# ═════════════════════════════════════════════════════════════
+# TAB 8 — Radar Global (scanner async, monitor-only)
+# ═════════════════════════════════════════════════════════════
+with tabs[7]:
+    from bot.dashboard.scanner_page import render_scanner_page
+
+    render_scanner_page(st)
 
 
 # ─────────────────────────────────────────────────────────────
