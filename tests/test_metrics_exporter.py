@@ -11,6 +11,7 @@ Evalúa:
 """
 
 import json
+import tempfile
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,10 @@ def _make_exporter(**kwargs: Any) -> MetricsExporter:
     (\"Duplicated timeseries\") entre tests.
     """
     kwargs.setdefault("registry", CollectorRegistry())
+    # Aislar el JSON de tests del archivo real data/metrics.json.
+    kwargs.setdefault(
+        "metrics_path", Path(tempfile.mkdtemp()) / "metrics.json"
+    )
     return MetricsExporter(**kwargs)
 
 

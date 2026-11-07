@@ -39,15 +39,18 @@ case "${1:-status}" in
         python3 - <<'PY'
 import json
 from pathlib import Path
-p = Path("data/metrics.json")
+
+state = Path("bot/dashboard/bot_state.json")
+metrics = Path("data/metrics.json")
+p = state if state.exists() else metrics
 if p.exists():
     d = json.loads(p.read_text())
     print("balance:", d.get("balance"))
     print("equity:", d.get("equity"))
-    print("posiciones:", d.get("positions"))
+    print("posiciones:", d.get("positions") or "sin posición")
     print("riesgo:", d.get("risk"))
 else:
-    print("sin data/metrics.json")
+    print("sin estado disponible")
 PY
         ;;
     logs)
