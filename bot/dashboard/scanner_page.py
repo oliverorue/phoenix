@@ -221,11 +221,12 @@ def render_scanner_page(st_module: Any = st) -> None:
                            sizing.kelly_multiplier),
                 unsafe_allow_html=True,
             )
+            mode = "paper" if bridge.is_dry_run() else "LIVE"
             if st_module.button(
-                f"🛒 Operar {r.signal.symbol} {r.signal.direction} (paper)",
+                f"🛒 Operar {r.signal.symbol} {r.signal.direction} ({mode})",
                 key=f"operar_{r.signal.symbol}_{i}",
             ):
-                trade = bridge.open_paper_trade(r.signal)
+                trade = bridge.execute(r.signal)
                 if trade is not None:
                     st_module.toast(
                         f"✅ Trade {trade.id} abierto: {trade.symbol} "

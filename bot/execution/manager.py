@@ -125,6 +125,25 @@ class TradeManager:
             self._finalize(trade)
             return trade
 
+    def close_with_pnl(
+        self, trade_id: str, realized_pnl: float, exit_price: float,
+        exit_reason: str, ts: Optional[float] = None,
+    ) -> Optional[Trade]:
+        """Cierra un trade con un PnL provisto por el exchange (modo live)."""
+        now = ts if ts is not None else time.time()
+        with self._lock:
+            trade = self._open.pop(trade_id, None)
+            if trade is None:
+                return None
+            trade.realized_pnl = realized_pnl
+            trade.exit_price = exit_price
+            trade.exit_reason = exit_reason
+            trade.closed_at = now
+            trade.remaining_qty = 0.0
+            trade.status = TradeStatus.CLOSED
+            self._finalize(trade)
+            return trade
+
     def _finalize(self, trade: Trade) -> None:
         self._open.pop(trade.id, None)
         lst = self._by_symbol.get(trade.symbol)

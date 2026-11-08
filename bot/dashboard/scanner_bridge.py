@@ -19,13 +19,18 @@ from typing import Optional
 
 from loguru import logger
 
+from bot.core.exchange_client import BinanceFuturesClient
 from bot.core.notifier import Notifier
+from bot.execution.broker import LiveBroker
+from bot.execution.live import LiveTradeExecutor
 from bot.execution.manager import TradeManager
 from bot.execution.models import Direction, Trade
 from bot.execution.progress import format_progress, stage_progress
+from bot.execution.security import enforce_live_config
 from bot.execution.sizing import plan_trade
 from bot.execution.store import TradeStore
 from bot.scanner.config import ScannerConfig
+from config.loader import API_KEY, API_SECRET, TESTNET
 from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import ScannerStats, Signal, Sizing
 from bot.scanner.ranker import RankedSignal, SignalRanker
@@ -52,9 +57,29 @@ class ScannerBridge:
         self.trades.load(self.trade_store)
         self.risk.load_history(self.trade_store.load_pnl())
         self.notifier = Notifier()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._client: Optional[BinanceFuturesClient] = None
+        self._broker: Optional[LiveBroker] = None
+        self._executor: Optional[LiveTradeExecutor] = None
+        self._live_states: dict[str, object] = {}
+        self._live_equity: float = self._config.paper_initial_capital
+        if not self._dry_run:
+            self._init_live()
         self._scanner = MarketScanner(self._config)
-        self._scanner.on_price = self.trades.on_price
+        if self._dry_run:
+            self._scanner.on_price = self.trades.on_price
         self._thread: Optional[threading.Thread] = None
+        self._stop_evt = threading.Event()
+
+    def _init_live(self) -> None:
+        """Valida keys y construye el cliente live + ejecutor."""
+        enforce_live_config()
+        self._client = BinanceFuturesClient(
+            API_KEY or "", API_SECRET or "", testnet=TESTNET,
+        )
+        self._broker = LiveBroker(self._client)
+        self._executor = LiveTradeExecutor(self._broker)
+        logger.warning("[live] MODO LIVE activado (testnet={})", TESTNET)
 
     def start(self) -> None:
         """Arranca el scanner en un hilo daemon (idempotente)."""
@@ -68,12 +93,44 @@ class ScannerBridge:
 
     def _run(self) -> None:
         try:
-            asyncio.run(self._scanner.run())
+            asyncio.run(self._run_async())
         except Exception as exc:  # noqa: BLE001
             logger.error(f"[scanner] error fatal: {exc}")
             self._scanner._record_error(exc)
 
+    async def _run_async(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        tasks = [asyncio.create_task(self._scanner.run(), name="scanner")]
+        if self._executor is not None:
+            tasks.append(asyncio.create_task(self._live_loop(), name="live"))
+        await asyncio.gather(*tasks)
+
+    async def _live_loop(self) -> None:
+        """Reconcilia trades live y sincroniza el capital con Binance."""
+        while not self._stop_evt.is_set():
+            try:
+                balance = await self._broker.balance()
+                self._live_equity = float(
+                    balance.get("available", self._live_equity)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[live] balance: {exc}")
+            for trade_id, state in list(self._live_states.items()):
+                try:
+                    closed = await self._executor.reconcile(state)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[live] reconcile {trade_id}: {exc}")
+                    continue
+                if closed:
+                    self.trades.close_with_pnl(
+                        trade_id, state.realized_pnl, state.exit_price,
+                        "LIVE_CLOSE",
+                    )
+                    self._live_states.pop(trade_id, None)
+            await asyncio.sleep(3)
+
     def stop(self) -> None:
+        self._stop_evt.set()
         self._scanner.stop()
 
     def is_running(self) -> bool:
@@ -121,10 +178,9 @@ class ScannerBridge:
         self._notify_async(self._send_trade_close, trade)
 
     def equity(self) -> float:
-        """Capital actual: inicial ($15) + PnL realizado de los trades paper.
-
-        En live se sincronizará con el balance USDT de Binance (100% del capital).
-        """
+        """Capital actual: balance de Binance (live) o inicial + PnL (paper)."""
+        if not self._dry_run:
+            return self._live_equity
         return self._config.paper_initial_capital + self.trades.stats()["pnl"]
 
     def suggest_sizing(self, signal: Signal) -> Sizing:
@@ -166,6 +222,58 @@ class ScannerBridge:
         self._notify_async(self._send_trade_open, trade)
         return trade
 
+    def execute(self, signal: Signal) -> Optional[Trade]:
+        """Abre un trade según el modo: paper (dry-run) o live."""
+        if self._dry_run:
+            return self.open_paper_trade(signal)
+        return self.open_live_trade(signal)
+
+    def open_live_trade(self, signal: Signal) -> Optional[Trade]:
+        """Abre un trade REAL en el exchange (requiere dry_run: false + keys)."""
+        if signal.direction not in ("LONG", "SHORT"):
+            return None
+        if self._executor is None or self._loop is None:
+            logger.warning("[live] ejecutor/loop no listos")
+            return None
+        sizing = self.suggest_sizing(signal)
+        if sizing.risk_usdt <= 0:
+            return None
+        direction = Direction(signal.direction)
+        plan = plan_trade(
+            symbol=signal.symbol,
+            direction=direction,
+            price=signal.price,
+            risk_usdt=sizing.risk_usdt,
+            sl_distance_pct=self._config.sl_distance_pct,
+            tp1_ratio=self._config.tp1_ratio,
+            trailing_dist_pct=self._config.trailing_dist_pct,
+        )
+        trade = self.trades.open_trade(
+            symbol=plan.symbol,
+            direction=plan.direction,
+            entry_price=plan.entry_price,
+            sl_price=plan.sl_price,
+            tp1_price=plan.tp1_price,
+            tp2_price=plan.tp2_price,
+            qty=plan.qty,
+            tp1_ratio=plan.tp1_ratio,
+            trailing_dist=plan.trailing_dist,
+        )
+        future = asyncio.run_coroutine_threadsafe(
+            self._executor.open(trade), self._loop,
+        )
+        try:
+            state = future.result(timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[live] open falló: {exc}")
+            self.trades.close_with_pnl(
+                trade.id, 0.0, trade.entry_price, "LIVE_ERROR",
+            )
+            return None
+        self._live_states[trade.id] = state
+        self._notify_async(self._send_trade_open, trade)
+        return trade
+
     def paper_open_trades(self) -> list[Trade]:
         return self.trades.open_trades()
 
@@ -185,11 +293,9 @@ class ScannerBridge:
         return result
 
     def kill_switch(self) -> int:
-        """Cierra TODOS los trades paper abiertos al último precio conocido.
-
-        Devuelve cuántos cerró. (Cuando se cablee el live, además cancelará las
-        órdenes abiertas y aplanará las posiciones reales del exchange.)
-        """
+        """Cierra todos los trades. En live aplana posiciones reales."""
+        if not self._dry_run:
+            return self._kill_switch_live()
         prices = self.trades.last_prices()
         closed = 0
         for trade in self.trades.open_trades():
@@ -197,6 +303,31 @@ class ScannerBridge:
             if self.trades.close_manual(trade.id, price) is not None:
                 closed += 1
         return closed
+
+    def _kill_switch_live(self) -> int:
+        if self._broker is None or self._client is None or self._loop is None:
+            return 0
+        future = asyncio.run_coroutine_threadsafe(self._flatten_all(), self._loop)
+        try:
+            return future.result(timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[live] kill switch: {exc}")
+            return 0
+
+    async def _flatten_all(self) -> int:
+        """Cancela órdenes y cierra a mercado (reduceOnly) todas las posiciones."""
+        positions = await self._client.get_all_positions()
+        count = 0
+        for pos in positions:
+            try:
+                await self._broker.cancel_all(pos["symbol"])
+                await self._broker.close_market(
+                    pos["symbol"], pos["side"], pos["size"],
+                )
+                count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[live] flatten {pos['symbol']}: {exc}")
+        return count
 
     # ── Notificaciones (Telegram/Discord) ────────────────
     def notifications_enabled(self) -> bool:

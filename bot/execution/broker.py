@@ -69,6 +69,16 @@ class LiveBroker:
             symbol, direction, stop_price, qty=qty,
         )
 
+    async def move_sl(self, symbol: str, direction: str, stop_price: float) -> dict:
+        """Cancela el SL actual y coloca uno nuevo (ej. a breakeven)."""
+        return await self._client.update_stop_loss(symbol, direction, stop_price)
+
+    async def fills(
+        self, symbol: str, order_id: Optional[str] = None,
+    ) -> list[dict]:
+        """Fills ejecutados (con PnL realizado) para journaling live."""
+        return await self._client.get_fills(symbol, order_id=order_id)
+
     async def cancel_all(self, symbol: str) -> None:
         await self._client.cancel_all_open_orders(symbol)
 

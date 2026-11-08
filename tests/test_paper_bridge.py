@@ -15,9 +15,14 @@ from bot.scanner.risk_engine import RiskEngine
 
 
 def make_bridge() -> ScannerBridge:
-    """Bridge sin I/O: solo los atributos que necesita open_paper_trade."""
+    """Bridge sin I/O: solo los atributos que necesita el flujo paper."""
     bridge = ScannerBridge.__new__(ScannerBridge)
     bridge._config = ScannerConfig()
+    bridge._dry_run = True
+    bridge._live_equity = bridge._config.paper_initial_capital
+    bridge._executor = None
+    bridge._loop = None
+    bridge._live_states = {}
     bridge.risk = RiskEngine(base_risk_pct=0.01)
     bridge.trades = TradeManager()
     return bridge
