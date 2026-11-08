@@ -372,3 +372,14 @@ class ScannerBridge:
     def progress_line(self) -> str:
         """Línea de progreso hacia la siguiente etapa (gates)."""
         return format_progress(stage_progress(self.trades.stats()))
+
+    def pnl_series(self) -> list[float]:
+        """PnL realizado de cada trade cerrado, en orden cronológico."""
+        return [t.realized_pnl for t in self.trades.closed_trades()]
+
+    def equity_curve(self) -> list[float]:
+        """Capital acumulado tras cada trade cerrado (incluye el inicial)."""
+        curve = [self._config.paper_initial_capital]
+        for pnl in self.pnl_series():
+            curve.append(curve[-1] + pnl)
+        return curve

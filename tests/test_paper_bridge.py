@@ -103,6 +103,23 @@ class TestTopSignalsDedup:
         assert [r.signal.symbol for r in ranked] == ["XRPUSDT", "SOLUSDT"]
 
 
+class TestEquityCurve:
+    def test_curve_starts_at_initial_and_accumulates(self):
+        bridge = make_bridge()
+        assert bridge.equity_curve()[0] == pytest.approx(15.0)
+        assert bridge.pnl_series() == []
+
+        sig = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
+        trade = bridge.open_paper_trade(sig)
+        bridge.trades.close_manual(trade.id, 1.01)
+
+        curve = bridge.equity_curve()
+        assert len(curve) == 2
+        assert curve[0] == pytest.approx(15.0)
+        assert curve[-1] > 15.0
+        assert len(bridge.pnl_series()) == 1
+
+
 class TestScannerPriceHook:
     @pytest.mark.asyncio
     async def test_on_price_callback_invoked_on_depth(self):
