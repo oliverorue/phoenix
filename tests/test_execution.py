@@ -169,3 +169,32 @@ class TestProfitFactor:
         win = mgr.open_trade("A", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
         mgr.close_manual(win.id, 101.0)
         assert mgr.stats()["profit_factor"] == float("inf")
+
+
+class TestTimeout:
+    def test_timeout_closes_at_market(self):
+        trade = make_long()  # entry 100, opened_at 1000
+        actions = advance(trade, 100.2, ts=1000.0 + 7200, max_hold_seconds=7200)
+        assert trade.status == TradeStatus.CLOSED
+        assert trade.exit_reason == "TIMEOUT"
+        assert actions[-1].kind == "FULL_CLOSE"
+        assert actions[-1].reason == "TIMEOUT"
+        assert trade.realized_pnl == pytest.approx(2.0)  # (100.2-100)*10
+
+    def test_sl_takes_priority_over_timeout(self):
+        trade = make_long()
+        advance(trade, 98.0, ts=1000.0 + 8000, max_hold_seconds=7200)
+        assert trade.exit_reason == "SL"
+
+    def test_no_timeout_if_disabled(self):
+        trade = make_long()
+        advance(trade, 100.2, ts=1000.0 + 99999, max_hold_seconds=0)
+        assert trade.status == TradeStatus.OPEN
+
+    def test_manager_timeout_closes_trade(self):
+        mgr = TradeManager(max_hold_seconds=7200)
+        trade = mgr.open_trade("XRPUSDT", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=1000.0)
+        mgr.on_price("XRPUSDT", 100.2, ts=1000.0 + 7200)
+        assert trade.status == TradeStatus.CLOSED
+        assert trade.exit_reason == "TIMEOUT"
+        assert mgr.open_trades() == []

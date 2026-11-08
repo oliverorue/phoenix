@@ -23,11 +23,17 @@ def _close(trade: Trade, price: float, reason: str, ts: float) -> None:
     trade.status = TradeStatus.CLOSED
 
 
-def advance(trade: Trade, price: float, ts: float = 0.0) -> list[Action]:
+def advance(
+    trade: Trade, price: float, ts: float = 0.0, max_hold_seconds: float = 0.0,
+) -> list[Action]:
     """Avanza la state machine del trade con el nuevo ``price``.
 
     Devuelve las acciones disparadas (PARTIAL_CLOSE, FULL_CLOSE, MOVE_SL,
     TRAIL). El trade queda mutado con su nuevo estado y PnL realizado.
+
+    Si ``max_hold_seconds > 0`` y el trade lleva más tiempo abierto que ese
+    límite (y no cerró por SL/TP en este tick), se cierra a precio de mercado
+    con razón ``TIMEOUT``.
     """
     if trade.status == TradeStatus.CLOSED:
         return []
@@ -84,5 +90,18 @@ def advance(trade: Trade, price: float, ts: float = 0.0) -> list[Action]:
                 (trade.tp2_price - trade.entry_price) * trade.remaining_qty * sign
             )
             _close(trade, trade.tp2_price, "TP2", ts)
+
+    # Timeout por tiempo máximo de hold (si no cerró por SL/TP en este tick).
+    if (
+        trade.status != TradeStatus.CLOSED
+        and max_hold_seconds > 0
+        and ts > 0
+        and trade.opened_at > 0
+        and ts - trade.opened_at >= max_hold_seconds
+    ):
+        qty = trade.remaining_qty
+        actions.append(Action("FULL_CLOSE", price, qty, "TIMEOUT"))
+        trade.realized_pnl += (price - trade.entry_price) * qty * sign
+        _close(trade, price, "TIMEOUT", ts)
 
     return actions

@@ -23,6 +23,7 @@ class TradeManager:
         self,
         store: Optional[object] = None,
         on_close: Optional[Callable[[Trade], None]] = None,
+        max_hold_seconds: float = 0.0,
     ) -> None:
         self._lock = threading.Lock()
         self._open: dict[str, Trade] = {}
@@ -31,6 +32,7 @@ class TradeManager:
         self._counter = 0
         self._store = store
         self._on_close = on_close
+        self._max_hold_seconds = max_hold_seconds
         self._last_price: dict[str, float] = {}
 
     def open_trade(
@@ -90,7 +92,7 @@ class TradeManager:
                 trade = self._open.get(tid)
                 if trade is None:
                     continue
-                for action in advance(trade, price, now):
+                for action in advance(trade, price, now, self._max_hold_seconds):
                     if action.kind in ("PARTIAL_CLOSE", "FULL_CLOSE"):
                         fill = Fill(tid, action.reason, action.qty, action.price, now)
                         trade.fills.append(fill)

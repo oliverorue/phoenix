@@ -51,6 +51,7 @@ scanner:
   dry_run: true
   paper_initial_capital: 15.0
   max_risk_pct: 0.10
+  max_hold_seconds: 7200
   sl_distance_pct: 0.015
   tp1_ratio: 0.6
   trailing_dist_pct: 0.0

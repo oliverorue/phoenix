@@ -64,6 +64,7 @@ class ScannerConfig(BaseModel):
     dry_run: bool = True  # True → paper simulado; False → órdenes reales (live)
     paper_initial_capital: float = 15.0  # capital inicial del paper (USDT)
     max_risk_pct: float = 0.10           # techo de riesgo/trade (Kelly manda hasta acá)
+    max_hold_seconds: int = 7200         # tiempo máximo abierto antes de cerrar por TIMEOUT
     sl_distance_pct: float = 0.015  # distancia al SL (1R) como fracción del precio
     tp1_ratio: float = 0.6          # porción cerrada en TP1 (50-65%)
     trailing_dist_pct: float = 0.0  # 0 = sin trailing (salida en TP2)
