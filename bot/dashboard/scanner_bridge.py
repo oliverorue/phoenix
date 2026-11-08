@@ -102,7 +102,18 @@ class ScannerBridge:
             now,
             self._scanner.volume_map(),
         )
-        return ranked[: limit if limit is not None else self._config.top_n]
+        # Un card por símbolo (el mejor rankeado): evita que un par activo
+        # copie el top-N con varias señales suyas de distintos momentos.
+        seen: set[str] = set()
+        unique: list[RankedSignal] = []
+        for ranked_signal in ranked:
+            symbol = ranked_signal.signal.symbol
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            unique.append(ranked_signal)
+        limit = limit if limit is not None else self._config.top_n
+        return unique[:limit]
 
     def _on_paper_close(self, trade: Trade) -> None:
         """Alimenta el Kelly con el PnL del trade y notifica el cierre."""

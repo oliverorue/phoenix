@@ -10,6 +10,7 @@ from bot.execution.models import Direction
 from bot.scanner.config import ScannerConfig
 from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import Signal
+from bot.scanner.ranker import SignalRanker
 from bot.scanner.risk_engine import RiskEngine
 
 
@@ -70,6 +71,31 @@ class TestKillSwitch:
         assert n == 2
         assert bridge.paper_open_trades() == []
         assert len(bridge.paper_closed_trades()) == 2
+
+
+class TestTopSignalsDedup:
+    def test_one_card_per_symbol(self):
+        bridge = ScannerBridge.__new__(ScannerBridge)
+        bridge._config = ScannerConfig()
+        bridge.ranker = SignalRanker(bridge._config)
+
+        class FakeScanner:
+            def signals_snapshot(self):
+                return [
+                    Signal(symbol="XRPUSDT", direction="LONG", confidence=0.9,
+                           price=1.0, ts=1000.0, reasons=["a", "b"]),
+                    Signal(symbol="XRPUSDT", direction="LONG", confidence=0.8,
+                           price=1.0, ts=999.0, reasons=["a", "b"]),
+                    Signal(symbol="SOLUSDT", direction="LONG", confidence=0.7,
+                           price=100.0, ts=1000.0, reasons=["a", "b"]),
+                ]
+
+            def volume_map(self):
+                return {"XRPUSDT": 1e8, "SOLUSDT": 5e7}
+
+        bridge._scanner = FakeScanner()
+        ranked = bridge.top_signals(now=1000.0, limit=10)
+        assert [r.signal.symbol for r in ranked] == ["XRPUSDT", "SOLUSDT"]
 
 
 class TestScannerPriceHook:
