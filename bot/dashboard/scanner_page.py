@@ -155,6 +155,10 @@ def render_scanner_page(st_module: Any = st) -> None:
         f"Capital automático (paper): **${bridge.equity():,.2f}** · "
         "riesgo por trade: Kelly con techo 10% · 100% del capital disponible."
     )
+    if st_module.button("🛑 Cerrar TODO (kill switch)"):
+        n = bridge.kill_switch()
+        st_module.toast(f"✅ {n} trade(s) cerrado(s)")
+        st_module.rerun()
 
     # ── Métricas ────────────────────────────────────────
     _signals, stats, _tracked = bridge.snapshot()

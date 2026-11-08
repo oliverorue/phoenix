@@ -164,3 +164,17 @@ class ScannerBridge:
             price = prices.get(trade.symbol, trade.entry_price)
             result.append((trade, self.trades.unrealized_pnl(trade), price))
         return result
+
+    def kill_switch(self) -> int:
+        """Cierra TODOS los trades paper abiertos al último precio conocido.
+
+        Devuelve cuántos cerró. (Cuando se cablee el live, además cancelará las
+        órdenes abiertas y aplanará las posiciones reales del exchange.)
+        """
+        prices = self.trades.last_prices()
+        closed = 0
+        for trade in self.trades.open_trades():
+            price = prices.get(trade.symbol, trade.entry_price)
+            if self.trades.close_manual(trade.id, price) is not None:
+                closed += 1
+        return closed

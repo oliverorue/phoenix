@@ -54,6 +54,24 @@ class TestOpenPaperTrade:
         assert bridge.open_paper_trade(signal) is None
 
 
+class TestKillSwitch:
+    def test_closes_all_open_trades(self):
+        bridge = make_bridge()
+        s1 = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
+        s2 = Signal(symbol="SOLUSDT", direction="SHORT", confidence=0.7, price=100.0)
+        bridge.open_paper_trade(s1)
+        bridge.open_paper_trade(s2)
+        bridge.trades.on_price("XRPUSDT", 1.01, ts=1.0)
+        bridge.trades.on_price("SOLUSDT", 99.0, ts=1.0)
+
+        assert len(bridge.paper_open_trades()) == 2
+        n = bridge.kill_switch()
+
+        assert n == 2
+        assert bridge.paper_open_trades() == []
+        assert len(bridge.paper_closed_trades()) == 2
+
+
 class TestScannerPriceHook:
     @pytest.mark.asyncio
     async def test_on_price_callback_invoked_on_depth(self):
