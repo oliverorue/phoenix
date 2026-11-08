@@ -207,7 +207,7 @@ class ScannerBridge:
         plan = plan_trade(
             symbol=signal.symbol,
             direction=direction,
-            price=signal.price,
+            price=self.trades.last_prices().get(signal.symbol, signal.price),
             risk_usdt=sizing.risk_usdt,
             sl_distance_pct=self._config.sl_distance_pct,
             tp1_ratio=self._config.tp1_ratio,
@@ -246,7 +246,7 @@ class ScannerBridge:
         plan = plan_trade(
             symbol=signal.symbol,
             direction=direction,
-            price=signal.price,
+            price=self.trades.last_prices().get(signal.symbol, signal.price),
             risk_usdt=sizing.risk_usdt,
             sl_distance_pct=self._config.sl_distance_pct,
             tp1_ratio=self._config.tp1_ratio,
