@@ -32,7 +32,8 @@ class RiskEngine:
         self._lock = threading.RLock()
 
     def suggest(self, capital: float, signal: Signal,
-                base_risk_pct: Optional[float] = None) -> Sizing:
+                base_risk_pct: Optional[float] = None,
+                max_risk_pct: Optional[float] = None) -> Sizing:
         """Devuelve cuántos USDT arriesgar en esta señal.
 
         ``risk_pct = base_risk_pct × confianza_escalada × kelly_mult`` con
@@ -41,7 +42,8 @@ class RiskEngine:
         según el historial registrado con :meth:`record_trade`.
 
         ``base_risk_pct`` permite sobreescribir el riesgo base desde la UI sin
-        recrear el motor (preservando el historial de Kelly).
+        recrear el motor (preservando el historial de Kelly). ``max_risk_pct``
+        aplica un techo duro (ej. 10%) por encima de lo que diga Kelly.
         """
         if capital <= 0:
             return Sizing(symbol=signal.symbol, note="Capital inválido (0 o negativo)")
@@ -59,6 +61,8 @@ class RiskEngine:
             1.0 - self.min_confidence_scale
         ) * signal.confidence
         risk_pct = eff_base * conf_scale * kelly_mult
+        if max_risk_pct is not None:
+            risk_pct = min(risk_pct, max_risk_pct)
         risk_usdt = capital * risk_pct
 
         return Sizing(

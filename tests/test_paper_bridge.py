@@ -23,10 +23,10 @@ def make_bridge() -> ScannerBridge:
 
 
 class TestOpenPaperTrade:
-    def test_long_trade_uses_kelly_and_1r2r_levels(self):
+    def test_long_trade_uses_auto_capital_and_kelly(self):
         bridge = make_bridge()
         signal = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
-        trade = bridge.open_paper_trade(signal, capital=100.0, risk_pct=0.01)
+        trade = bridge.open_paper_trade(signal)
 
         assert trade is not None
         assert trade.symbol == "XRPUSDT"
@@ -35,13 +35,23 @@ class TestOpenPaperTrade:
         assert trade.sl_price == pytest.approx(0.985)
         assert trade.tp1_price == pytest.approx(1.015)
         assert trade.tp2_price == pytest.approx(1.03)
-        # conf_scale = 0.5 + 0.5*0.7 = 0.85 → risk = 100*0.01*0.85 = 0.85
-        assert trade.qty == pytest.approx(0.85 / 0.015)
+        # equity 15 · riesgo = 15 × 0.085 ≈ 1.28 (redondeado) → qty = 1.28 / 0.015
+        assert trade.qty == pytest.approx(1.28 / 0.015)
+
+    def test_equity_starts_at_15(self):
+        assert make_bridge().equity() == pytest.approx(15.0)
+
+    def test_equity_tracks_realized_pnl(self):
+        bridge = make_bridge()
+        signal = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
+        trade = bridge.open_paper_trade(signal)
+        bridge.trades.close_manual(trade.id, 1.01)
+        assert bridge.equity() > 15.0
 
     def test_neutral_signal_returns_none(self):
         bridge = make_bridge()
         signal = Signal(symbol="XRPUSDT", direction="NEUTRAL", confidence=0.7, price=1.0)
-        assert bridge.open_paper_trade(signal, capital=100.0) is None
+        assert bridge.open_paper_trade(signal) is None
 
 
 class TestScannerPriceHook:

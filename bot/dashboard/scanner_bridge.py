@@ -25,7 +25,7 @@ from bot.execution.sizing import plan_trade
 from bot.execution.store import TradeStore
 from bot.scanner.config import ScannerConfig
 from bot.scanner.market_scanner import MarketScanner
-from bot.scanner.models import ScannerStats, Signal
+from bot.scanner.models import ScannerStats, Signal, Sizing
 from bot.scanner.ranker import RankedSignal, SignalRanker
 from bot.scanner.risk_engine import RiskEngine
 
@@ -103,14 +103,26 @@ class ScannerBridge:
         """Alimenta el Kelly con el PnL de un trade paper cerrado."""
         self.risk.record_trade(trade.realized_pnl)
 
-    def open_paper_trade(
-        self, signal: Signal, capital: float,
-        risk_pct: Optional[float] = None,
-    ) -> Optional[Trade]:
-        """Abre un trade dry-run para una señal, con tamaño Kelly y niveles 1R/2R."""
+    def equity(self) -> float:
+        """Capital actual: inicial ($15) + PnL realizado de los trades paper.
+
+        En live se sincronizará con el balance USDT de Binance (100% del capital).
+        """
+        return self._config.paper_initial_capital + self.trades.stats()["pnl"]
+
+    def suggest_sizing(self, signal: Signal) -> Sizing:
+        """Riesgo automático para una señal: Kelly, con techo ``max_risk_pct``."""
+        return self.risk.suggest(
+            self.equity(), signal,
+            base_risk_pct=self._config.max_risk_pct,
+            max_risk_pct=self._config.max_risk_pct,
+        )
+
+    def open_paper_trade(self, signal: Signal) -> Optional[Trade]:
+        """Abre un trade dry-run con capital y riesgo automáticos (Kelly)."""
         if signal.direction not in ("LONG", "SHORT"):
             return None
-        sizing = self.risk.suggest(capital, signal, base_risk_pct=risk_pct)
+        sizing = self.suggest_sizing(signal)
         if sizing.risk_usdt <= 0:
             return None
         direction = Direction(signal.direction)

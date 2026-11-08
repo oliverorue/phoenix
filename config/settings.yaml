@@ -49,6 +49,8 @@ scanner:
   w_freshness: 0.1
   freshness_halflife_seconds: 300
   dry_run: true
+  paper_initial_capital: 15.0
+  max_risk_pct: 0.10
   sl_distance_pct: 0.015
   tp1_ratio: 0.6
   trailing_dist_pct: 0.0

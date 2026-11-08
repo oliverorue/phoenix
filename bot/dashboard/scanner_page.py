@@ -84,38 +84,50 @@ def _card_html(ranked: RankedSignal, rank: int, risk_usdt: float,
     )
 
 
+def _pnl_color(value: float) -> str:
+    return "#16a34a" if value >= 0 else "#dc2626"
+
+
 def _render_paper(st_module: Any, bridge: ScannerBridge) -> None:
-    """Panel de trades paper (dry-run): abiertos con PnL latente, cerrados y métricas."""
+    """Panel de trades paper: capital automático, PnL en vivo, abiertos y cerrados."""
     s = bridge.paper_stats()
     open_pos = bridge.paper_open_positions()
     unrealized = sum(upnl for _t, upnl, _p in open_pos)
 
-    c1, c2, c3, c4, c5 = st_module.columns(5)
-    c1.metric("Cerrados", s["total"])
-    c2.metric("Win rate", f"{s['win_rate'] * 100:.0f}%")
-    c3.metric("Wins / Losses", f"{s['wins']} / {s['losses']}")
-    c4.metric("PnL realizado", f"${s['pnl']:+.2f}")
-    c5.metric("PnL latente", f"${unrealized:+.2f}")
+    c1, c2, c3, c4 = st_module.columns(4)
+    c1.metric("💵 Capital", f"${bridge.equity():,.2f}")
+    c2.metric("PnL realizado", f"${s['pnl']:+.2f}")
+    c3.metric("PnL latente", f"${unrealized:+.2f}")
+    c4.metric("Win rate", f"{s['win_rate'] * 100:.0f}%")
 
     if open_pos:
-        st_module.markdown("**Abiertos**")
+        st_module.markdown("**🔓 Abiertos**")
         for t, upnl, price in open_pos:
             dist_sl = abs(price - t.sl_price) / price * 100 if price else 0.0
             st_module.markdown(
-                f"- `{t.id}` {t.symbol} {t.direction.value} · precio {price} · "
-                f"entry {t.entry_price} · SL {t.sl_price} ({dist_sl:.2f}%) · "
-                f"uPnL {upnl:+.2f} USDT · {t.status.value}"
+                f'<div style="border-left:4px solid {_pnl_color(upnl)};'
+                f'padding:6px 10px;margin:4px 0;background:rgba(255,255,255,0.03);'
+                f'border-radius:8px">'
+                f'<b>{t.id} {t.symbol} {t.direction.value}</b> · '
+                f'precio {price:g} · entró {t.entry_price:g} · SL {t.sl_price:g} '
+                f'({dist_sl:.2f}%) · '
+                f'<span style="color:{_pnl_color(upnl)}">uPnL {upnl:+.2f} USDT</span> · '
+                f'{t.status.value}</div>',
+                unsafe_allow_html=True,
             )
     else:
         st_module.caption("Sin trades abiertos.")
 
     closed = bridge.paper_closed_trades()
     if closed:
-        st_module.markdown("**Cerrados (recientes)**")
+        st_module.markdown("**🔒 Cerrados (recientes)**")
         for t in reversed(closed[-10:]):
             st_module.markdown(
-                f"- `{t.id}` {t.symbol} {t.direction.value} · {t.exit_reason} · "
-                f"PnL {t.realized_pnl:+.2f} USDT"
+                f'<div style="padding:4px 10px;margin:2px 0">'
+                f'{t.id} {t.symbol} {t.direction.value} · {t.exit_reason} · '
+                f'<span style="color:{_pnl_color(t.realized_pnl)}">'
+                f'PnL {t.realized_pnl:+.2f} USDT</span></div>',
+                unsafe_allow_html=True,
             )
 
 
@@ -133,36 +145,31 @@ def render_scanner_page(st_module: Any = st) -> None:
 
     bridge = _get_bridge()
 
-    # ── Controles ───────────────────────────────────────
-    c_cap, c_risk, c_n, c_conf = st_module.columns(4)
-    with c_cap:
-        capital = st_module.number_input(
-            "💵 Capital (USDT)", min_value=10.0, value=500.0, step=10.0,
-        )
-    with c_risk:
-        base_risk_pct = st_module.number_input(
-            "🎚️ Riesgo/trade (%)", min_value=0.1, max_value=3.0,
-            value=1.0, step=0.1,
-        ) / 100.0
+    # ── Controles (capital y riesgo son AUTOMÁTICOS) ─────
+    c_n, c_conf = st_module.columns(2)
     with c_n:
         top_n = st_module.slider("Nº señales", 1, 10, 3)
     with c_conf:
         min_conf = st_module.slider("Confianza mínima", 0, 90, 40, step=5) / 100.0
+    st_module.caption(
+        f"Capital automático (paper): **${bridge.equity():,.2f}** · "
+        "riesgo por trade: Kelly con techo 10% · 100% del capital disponible."
+    )
 
     # ── Métricas ────────────────────────────────────────
     _signals, stats, _tracked = bridge.snapshot()
     m1, m2, m3, m4 = st_module.columns(4)
-    m1.metric("Pares rastreados", stats.tracked)
-    m2.metric("Señales en buffer", stats.signals_emitted)
-    m3.metric("Eventos", f"{stats.events_processed:,}")
-    m4.metric("Reconexiones", stats.reconnects)
+    m1.metric("💵 Capital (auto)", f"${bridge.equity():,.2f}")
+    m2.metric("Pares rastreados", stats.tracked)
+    m3.metric("Señales en buffer", stats.signals_emitted)
+    m4.metric("Eventos", f"{stats.events_processed:,}")
 
     with st_module.expander("🔍 Diagnóstico técnico", expanded=False):
         d = stats.diagnostics
         st_module.markdown(
             f"evals `{d.get('evals', 0)}` · agg `{d.get('agg', 0)}` · "
             f"depth `{d.get('depth', 0)}` · funding `{d.get('funding', 0)}` · "
-            f"force `{d.get('force', 0)}`"
+            f"force `{d.get('force', 0)}` · reconexiones `{stats.reconnects}`"
         )
         st_module.markdown(
             f"hits — OBI `{d.get('obi_hits', 0)}` · delta `{d.get('delta_hits', 0)}` · "
@@ -192,9 +199,7 @@ def render_scanner_page(st_module: Any = st) -> None:
         st_module.info("Sin señales que cumplan los filtros. Ajustá confianza o esperá.")
     else:
         for i, r in enumerate(ranked, start=1):
-            sizing = bridge.risk.suggest(
-                capital, r.signal, base_risk_pct=base_risk_pct,
-            )
+            sizing = bridge.suggest_sizing(r.signal)
             st_module.markdown(
                 _card_html(r, i, sizing.risk_usdt, sizing.risk_pct,
                            sizing.kelly_multiplier),
@@ -204,7 +209,7 @@ def render_scanner_page(st_module: Any = st) -> None:
                 f"🛒 Operar {r.signal.symbol} {r.signal.direction} (paper)",
                 key=f"operar_{r.signal.symbol}_{i}",
             ):
-                trade = bridge.open_paper_trade(r.signal, capital, base_risk_pct)
+                trade = bridge.open_paper_trade(r.signal)
                 if trade is not None:
                     st_module.toast(
                         f"✅ Trade {trade.id} abierto: {trade.symbol} "
