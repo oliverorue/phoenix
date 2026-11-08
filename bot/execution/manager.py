@@ -176,13 +176,20 @@ class TradeManager:
         """Métricas agregadas sobre los trades cerrados."""
         with self._lock:
             closed = list(self._closed)
-            wins = sum(1 for t in closed if t.realized_pnl > 0)
-            losses = sum(1 for t in closed if t.realized_pnl < 0)
-            decided = wins + losses
-            return {
-                "total": len(closed),
-                "wins": wins,
-                "losses": losses,
-                "win_rate": (wins / decided) if decided else 0.0,
-                "pnl": sum(t.realized_pnl for t in closed),
-            }
+        wins = sum(1 for t in closed if t.realized_pnl > 0)
+        losses = sum(1 for t in closed if t.realized_pnl < 0)
+        gross_profit = sum(t.realized_pnl for t in closed if t.realized_pnl > 0)
+        gross_loss = abs(sum(t.realized_pnl for t in closed if t.realized_pnl < 0))
+        decided = wins + losses
+        if gross_loss > 0:
+            profit_factor = gross_profit / gross_loss
+        else:
+            profit_factor = float("inf") if gross_profit > 0 else 0.0
+        return {
+            "total": len(closed),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": (wins / decided) if decided else 0.0,
+            "pnl": sum(t.realized_pnl for t in closed),
+            "profit_factor": profit_factor,
+        }

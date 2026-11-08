@@ -34,18 +34,24 @@ class Notifier:
         else:
             logger.info("✅ Notificaciones habilitadas")
 
-    def send(self, title: str, message: str, severity: str = "INFO", alert_type: str = "generic") -> None:
-        """Envía a todos los canales configurados respetando cooldown."""
+    def send(self, title: str, message: str, severity: str = "INFO",
+             alert_type: str = "generic", force: bool = False) -> None:
+        """Envía a todos los canales configurados respetando cooldown.
+
+        ``force=True`` saltea el cooldown (para eventos de trade que no se
+        pueden perder).
+        """
         if not self.enabled:
             return
 
-        # Respetar cooldown
+        # Respetar cooldown (salvo force)
         now = time.time()
-        last = self._last_alert.get(alert_type, 0)
-        cooldown = self.cooldown_seconds.get(alert_type, 10)
-        if now - last < cooldown:
-            logger.debug(f"Alerta '{alert_type}' en cooldown ({cooldown}s)")
-            return
+        if not force:
+            last = self._last_alert.get(alert_type, 0)
+            cooldown = self.cooldown_seconds.get(alert_type, 10)
+            if now - last < cooldown:
+                logger.debug(f"Alerta '{alert_type}' en cooldown ({cooldown}s)")
+                return
 
         self._last_alert[alert_type] = now
 
@@ -232,3 +238,56 @@ class Notifier:
             self.send("📊 RESUMEN DIARIO", msg, "INFO", alert_type="daily_summary")
         except Exception as e:
             logger.warning(f"Error generando resumen diario: {e}")
+
+    # ── Paper / radar (dry-run y live) ────────────────────────
+
+    def paper_open(self, trade: Any, equity: float, kelly_mult: float) -> None:
+        """Notificación al abrir un trade (paper o live)."""
+        emoji = "📈" if trade.direction.value == "LONG" else "📉"
+        msg = (
+            f"Símbolo: {trade.symbol} — {trade.direction.value}\n"
+            f"Entrada: {trade.entry_price:g}\n"
+            f"SL: {trade.sl_price:g} · TP1: {trade.tp1_price:g} · "
+            f"TP2: {trade.tp2_price:g}\n"
+            f"Cantidad: {trade.qty:g}\n"
+            f"Capital: ${equity:,.2f} · Kelly ×{kelly_mult:.2f}"
+        )
+        self.send(
+            f"{emoji} {trade.direction.value} ABIERTO — {trade.symbol}",
+            msg, "INFO", "trade_open", force=True,
+        )
+
+    def paper_close(self, trade: Any, equity: float, kelly_mult: float,
+                    stats: dict, progress_line: str) -> None:
+        """Notificación al cerrar un trade, con Kelly y progreso de etapa."""
+        pnl = trade.realized_pnl
+        emoji = "🟢" if pnl > 0 else ("🔴" if pnl < 0 else "⚪")
+        severity = "SUCCESS" if pnl > 0 else "WARNING"
+        msg = (
+            f"Símbolo: {trade.symbol} — {trade.direction.value}\n"
+            f"Razón: {trade.exit_reason}\n"
+            f"Entrada: {trade.entry_price:g} → Salida: {trade.exit_price:g}\n"
+            f"PnL: {pnl:+.2f} USDT\n"
+            f"Capital: ${equity:,.2f} · Kelly ×{kelly_mult:.2f}\n"
+            f"Win rate: {stats['win_rate'] * 100:.0f}% "
+            f"({stats['wins']}W/{stats['losses']}L)\n"
+            f"{progress_line}"
+        )
+        self.send(
+            f"{emoji} CERRADO — {trade.symbol} {pnl:+.2f} USDT",
+            msg, severity, "trade_close", force=True,
+        )
+
+    def paper_status(self, equity: float, kelly_mult: float, stats: dict,
+                     progress_line: str) -> None:
+        """Estado on-demand del paper: capital, Kelly, win-rate y etapa."""
+        msg = (
+            f"Capital: ${equity:,.2f}\n"
+            f"Kelly ×{kelly_mult:.2f}\n"
+            f"Cerrados: {stats['total']} "
+            f"({stats['wins']}W/{stats['losses']}L) · "
+            f"WR {stats['win_rate'] * 100:.0f}%\n"
+            f"PnL: ${stats['pnl']:+.2f}\n"
+            f"{progress_line}"
+        )
+        self.send("📊 ESTADO PAPER", msg, "INFO", "daily_summary", force=True)

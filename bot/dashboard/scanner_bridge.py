@@ -19,8 +19,10 @@ from typing import Optional
 
 from loguru import logger
 
+from bot.core.notifier import Notifier
 from bot.execution.manager import TradeManager
 from bot.execution.models import Direction, Trade
+from bot.execution.progress import format_progress, stage_progress
 from bot.execution.sizing import plan_trade
 from bot.execution.store import TradeStore
 from bot.scanner.config import ScannerConfig
@@ -48,6 +50,7 @@ class ScannerBridge:
         )
         self.trades.load(self.trade_store)
         self.risk.load_history(self.trade_store.load_pnl())
+        self.notifier = Notifier()
         self._scanner = MarketScanner(self._config)
         self._scanner.on_price = self.trades.on_price
         self._thread: Optional[threading.Thread] = None
@@ -60,6 +63,7 @@ class ScannerBridge:
             target=self._run, daemon=True, name="market-scanner",
         )
         self._thread.start()
+        self._notify_async(self._send_start)
 
     def _run(self) -> None:
         try:
@@ -100,8 +104,9 @@ class ScannerBridge:
         return ranked[: limit if limit is not None else self._config.top_n]
 
     def _on_paper_close(self, trade: Trade) -> None:
-        """Alimenta el Kelly con el PnL de un trade paper cerrado."""
+        """Alimenta el Kelly con el PnL del trade y notifica el cierre."""
         self.risk.record_trade(trade.realized_pnl)
+        self._notify_async(self._send_trade_close, trade)
 
     def equity(self) -> float:
         """Capital actual: inicial ($15) + PnL realizado de los trades paper.
@@ -135,7 +140,7 @@ class ScannerBridge:
             tp1_ratio=self._config.tp1_ratio,
             trailing_dist_pct=self._config.trailing_dist_pct,
         )
-        return self.trades.open_trade(
+        trade = self.trades.open_trade(
             symbol=plan.symbol,
             direction=plan.direction,
             entry_price=plan.entry_price,
@@ -146,6 +151,8 @@ class ScannerBridge:
             tp1_ratio=plan.tp1_ratio,
             trailing_dist=plan.trailing_dist,
         )
+        self._notify_async(self._send_trade_open, trade)
+        return trade
 
     def paper_open_trades(self) -> list[Trade]:
         return self.trades.open_trades()
@@ -178,3 +185,47 @@ class ScannerBridge:
             if self.trades.close_manual(trade.id, price) is not None:
                 closed += 1
         return closed
+
+    # ── Notificaciones (Telegram/Discord) ────────────────
+    def notifications_enabled(self) -> bool:
+        notifier = getattr(self, "notifier", None)
+        return notifier is not None and notifier.enabled
+
+    def _notify_async(self, fn, *args) -> None:
+        if not self.notifications_enabled():
+            return
+        threading.Thread(target=fn, args=args, daemon=True).start()
+
+    def _send_start(self) -> None:
+        self.notifier.send(
+            "🚀 PAPER INICIADO",
+            f"Capital: ${self.equity():,.2f} · esperando señales",
+            "INFO", "generic", force=True,
+        )
+
+    def _send_trade_open(self, trade: Trade) -> None:
+        self.notifier.paper_open(trade, self.equity(), self.risk.multiplier())
+
+    def _send_trade_close(self, trade: Trade) -> None:
+        stats = self.trades.stats()
+        progress = stage_progress(stats)
+        self.notifier.paper_close(
+            trade, self.equity(), self.risk.multiplier(), stats,
+            format_progress(progress),
+        )
+
+    def _send_status(self) -> None:
+        stats = self.trades.stats()
+        progress = stage_progress(stats)
+        self.notifier.paper_status(
+            self.equity(), self.risk.multiplier(), stats,
+            format_progress(progress),
+        )
+
+    def notify_status(self) -> None:
+        """Envía un estado del paper a Telegram/Discord (no bloqueante)."""
+        self._notify_async(self._send_status)
+
+    def progress_line(self) -> str:
+        """Línea de progreso hacia la siguiente etapa (gates)."""
+        return format_progress(stage_progress(self.trades.stats()))

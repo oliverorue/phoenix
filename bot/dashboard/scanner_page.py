@@ -100,6 +100,18 @@ def _render_paper(st_module: Any, bridge: ScannerBridge) -> None:
     c3.metric("PnL latente", f"${unrealized:+.2f}")
     c4.metric("Win rate", f"{s['win_rate'] * 100:.0f}%")
 
+    st_module.caption(f"**Etapa:** {bridge.progress_line()}")
+
+    if st_module.button("📨 Enviar estado a Telegram"):
+        if bridge.notifications_enabled():
+            bridge.notify_status()
+            st_module.toast("Estado enviado a Telegram")
+        else:
+            st_module.warning(
+                "Telegram desactivado: configurá TELEGRAM_TOKEN y "
+                "TELEGRAM_CHAT_ID en config/secrets.env"
+            )
+
     if open_pos:
         st_module.markdown("**🔓 Abiertos**")
         for t, upnl, price in open_pos:

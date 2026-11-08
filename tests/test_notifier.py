@@ -212,3 +212,73 @@ class TestNotifierCooldown:
         mock_time.return_value = 1015.0
         notifier.send("Test", "Message", severity="INFO", alert_type="generic")
         assert mock_telegram.call_count == 2  # Ahora sí se envía
+
+    @patch("time.time")
+    @patch.object(Notifier, "_send_telegram")
+    def test_force_bypasses_cooldown(self, mock_telegram, mock_time, notifier):
+        """force=True saltea el cooldown (eventos de trade)."""
+        mock_time.return_value = 1000.0
+        notifier.send("T", "M", alert_type="trade_close", force=True)
+        notifier.send("T", "M", alert_type="trade_close", force=True)
+        assert mock_telegram.call_count == 2
+
+
+class TestPaperNotifications:
+    """Notificaciones de trades paper (open/close) y estado."""
+
+    @pytest.fixture
+    def notifier(self):
+        n = Notifier()
+        n.telegram_token = "fake"
+        n.telegram_chat = "123"
+        n.discord_webhook = ""
+        n.enabled = True
+        return n
+
+    @staticmethod
+    def _trade():
+        from bot.execution.models import Direction, Trade
+
+        trade = Trade(
+            id="T1", symbol="XRPUSDT", direction=Direction.LONG,
+            entry_price=1.0, sl_price=0.985, tp1_price=1.015, tp2_price=1.03,
+            qty=85.0,
+        )
+        trade.realized_pnl = 1.5
+        trade.exit_price = 1.03
+        trade.exit_reason = "TP2"
+        return trade
+
+    @patch.object(Notifier, "send")
+    def test_paper_open(self, mock_send, notifier):
+        notifier.paper_open(self._trade(), equity=15.0, kelly_mult=1.0)
+        mock_send.assert_called_once()
+        args, kwargs = mock_send.call_args
+        assert kwargs.get("force") is True
+        assert args[3] == "trade_open"
+        assert "XRPUSDT" in str(args)
+
+    @patch.object(Notifier, "send")
+    def test_paper_close_includes_pnl_kelly_progress(self, mock_send, notifier):
+        stats = {"win_rate": 0.5, "wins": 2, "losses": 2}
+        notifier.paper_close(
+            self._trade(), equity=15.85, kelly_mult=1.1,
+            stats=stats, progress_line="10/40 trades",
+        )
+        mock_send.assert_called_once()
+        args, kwargs = mock_send.call_args
+        assert kwargs.get("force") is True
+        assert args[3] == "trade_close"
+        message = args[1]
+        assert "PnL" in message
+        assert "Kelly" in message
+        assert "10/40 trades" in message
+
+    @patch.object(Notifier, "send")
+    def test_paper_status(self, mock_send, notifier):
+        stats = {"total": 3, "wins": 2, "losses": 1,
+                 "win_rate": 0.667, "pnl": 1.2}
+        notifier.paper_status(15.0, 1.0, stats, "3/40 trades")
+        mock_send.assert_called_once()
+        args, kwargs = mock_send.call_args
+        assert "ESTADO PAPER" in args[0]

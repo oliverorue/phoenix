@@ -153,3 +153,19 @@ class TestUnrealized:
         trade = mgr.open_trade("XRPUSDT", "SHORT", 100.0, 101.0, 99.0, 98.0, 10.0, ts=0.0)
         mgr.on_price("XRPUSDT", 99.5, ts=1.0)
         assert mgr.unrealized_pnl(trade) == pytest.approx(5.0)
+
+
+class TestProfitFactor:
+    def test_profit_factor_with_losses(self):
+        mgr = TradeManager()
+        win = mgr.open_trade("A", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        mgr.close_manual(win.id, 101.0)  # +10
+        loss = mgr.open_trade("B", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        mgr.close_manual(loss.id, 99.0)  # -10
+        assert mgr.stats()["profit_factor"] == pytest.approx(1.0)
+
+    def test_profit_factor_no_losses_is_inf(self):
+        mgr = TradeManager()
+        win = mgr.open_trade("A", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        mgr.close_manual(win.id, 101.0)
+        assert mgr.stats()["profit_factor"] == float("inf")

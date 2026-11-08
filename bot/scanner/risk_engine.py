@@ -77,6 +77,11 @@ class RiskEngine:
         with self._lock:
             self.kelly.record_trade(pnl_usdt)
 
+    def multiplier(self) -> float:
+        """Multiplicador actual de Kelly (thread-safe)."""
+        with self._lock:
+            return self.kelly.get_multiplier()
+
     def load_history(self, pnl_usdts: list[float]) -> None:
         """Reconstruye el estado de Kelly a partir de resultados históricos."""
         with self._lock:
