@@ -289,11 +289,19 @@ def render_scanner_page(st_module: Any = st) -> None:
     k4.metric("🔢 Trades", f"{s['total']}/40")
 
     # ── Controles ───────────────────────────────────────
-    c_n, c_conf, c_kill = st_module.columns([2, 2, 1])
+    c_n, c_conf, c_auto, c_kill = st_module.columns([2, 2, 1, 1])
     with c_n:
         top_n = st_module.slider("Nº señales", 1, 10, 3)
     with c_conf:
         min_conf = st_module.slider("Confianza mínima", 0, 90, 40, step=5) / 100.0
+    with c_auto:
+        st_module.write("")
+        new_auto = st_module.toggle(
+            "🤖 Auto top-1", value=bridge.auto_trade_enabled(),
+        )
+        if new_auto != bridge.auto_trade_enabled():
+            bridge.set_auto_trade(new_auto)
+            st_module.rerun()
     with c_kill:
         st_module.write("")
         if st_module.button("🛑 Cerrar TODO", use_container_width=True):
@@ -302,9 +310,10 @@ def render_scanner_page(st_module: Any = st) -> None:
             st_module.rerun()
 
     mode = "PAPER" if bridge.is_dry_run() else "LIVE"
+    auto_txt = "ON" if bridge.auto_trade_enabled() else "OFF"
     st_module.caption(
         f"Modo **{mode}** · capital y riesgo automáticos (Kelly, techo 10%) · "
-        "100% del capital disponible."
+        f"100% del capital · Auto-entrada **{auto_txt}**."
     )
 
     # ── Tabs ────────────────────────────────────────────

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from bot.dashboard.scanner_bridge import ScannerBridge
@@ -118,6 +120,103 @@ class TestEquityCurve:
         assert curve[0] == pytest.approx(15.0)
         assert curve[-1] > 15.0
         assert len(bridge.pnl_series()) == 1
+
+
+class TestAutoTrade:
+    def _bridge(self, **cfg) -> ScannerBridge:
+        bridge = make_bridge()
+        bridge._config = ScannerConfig(**cfg)
+        bridge.ranker = SignalRanker(bridge._config)
+        bridge._auto_trade = True
+        bridge._last_close_ts = {}
+        return bridge
+
+    @staticmethod
+    def _set_signals(bridge, signals) -> None:
+        class FakeScanner:
+            def signals_snapshot(self):
+                return signals
+
+            def volume_map(self):
+                return {s.symbol: 1e8 for s in signals}
+
+        bridge._scanner = FakeScanner()
+
+    @pytest.mark.asyncio
+    async def test_opens_top1_when_empty(self):
+        bridge = self._bridge(
+            auto_trade=True, max_open_trades=1, min_confidence=0.3,
+            auto_trade_max_signal_age_seconds=600,
+            auto_trade_symbol_cooldown_seconds=0,
+        )
+        self._set_signals(bridge, [Signal(
+            symbol="XRPUSDT", direction="LONG", confidence=0.8, price=1.0,
+            ts=time.time(), reasons=["a", "b"],
+        )])
+        await bridge._auto_trade_tick()
+        assert len(bridge.paper_open_trades()) == 1
+
+    @pytest.mark.asyncio
+    async def test_does_not_open_when_full(self):
+        bridge = self._bridge(
+            auto_trade=True, max_open_trades=1, min_confidence=0.3,
+            auto_trade_max_signal_age_seconds=600,
+            auto_trade_symbol_cooldown_seconds=0,
+        )
+        self._set_signals(bridge, [Signal(
+            symbol="XRPUSDT", direction="LONG", confidence=0.8, price=1.0,
+            ts=time.time(), reasons=["a", "b"],
+        )])
+        await bridge._auto_trade_tick()
+        self._set_signals(bridge, [Signal(
+            symbol="SOLUSDT", direction="LONG", confidence=0.8, price=1.0,
+            ts=time.time(), reasons=["a", "b"],
+        )])
+        await bridge._auto_trade_tick()
+        assert len(bridge.paper_open_trades()) == 1
+
+    @pytest.mark.asyncio
+    async def test_skips_stale_signal(self):
+        bridge = self._bridge(
+            auto_trade=True, max_open_trades=1, min_confidence=0.3,
+            auto_trade_max_signal_age_seconds=10,
+            auto_trade_symbol_cooldown_seconds=0,
+        )
+        self._set_signals(bridge, [Signal(
+            symbol="XRPUSDT", direction="LONG", confidence=0.8, price=1.0,
+            ts=time.time() - 100, reasons=["a", "b"],
+        )])
+        await bridge._auto_trade_tick()
+        assert bridge.paper_open_trades() == []
+
+    @pytest.mark.asyncio
+    async def test_skips_low_confidence(self):
+        bridge = self._bridge(
+            auto_trade=True, max_open_trades=1, min_confidence=0.9,
+            auto_trade_max_signal_age_seconds=600,
+            auto_trade_symbol_cooldown_seconds=0,
+        )
+        self._set_signals(bridge, [Signal(
+            symbol="XRPUSDT", direction="LONG", confidence=0.5, price=1.0,
+            ts=time.time(), reasons=["a", "b"],
+        )])
+        await bridge._auto_trade_tick()
+        assert bridge.paper_open_trades() == []
+
+    @pytest.mark.asyncio
+    async def test_respects_symbol_cooldown(self):
+        bridge = self._bridge(
+            auto_trade=True, max_open_trades=1, min_confidence=0.3,
+            auto_trade_max_signal_age_seconds=600,
+            auto_trade_symbol_cooldown_seconds=300,
+        )
+        self._set_signals(bridge, [Signal(
+            symbol="XRPUSDT", direction="LONG", confidence=0.8, price=1.0,
+            ts=time.time(), reasons=["a", "b"],
+        )])
+        bridge._last_close_ts["XRPUSDT"] = time.time()
+        await bridge._auto_trade_tick()
+        assert bridge.paper_open_trades() == []
 
 
 class TestScannerPriceHook:

@@ -69,6 +69,13 @@ class ScannerConfig(BaseModel):
     tp1_ratio: float = 0.6          # porción cerrada en TP1 (50-65%)
     trailing_dist_pct: float = 0.0  # 0 = sin trailing (salida en TP2)
 
+    # ── Auto-entrada (opcional) ─────────────────────────
+    auto_trade: bool = False                  # abre el top-1 automáticamente
+    max_open_trades: int = 1                  # trades abiertos simultáneos
+    auto_trade_interval_seconds: float = 5.0  # cada cuánto evalúa el loop
+    auto_trade_max_signal_age_seconds: float = 60.0   # ignora señales viejas
+    auto_trade_symbol_cooldown_seconds: float = 300.0  # no re-abrir el mismo símbolo
+
     @classmethod
     def from_settings(cls, overrides: Optional[dict[str, Any]] = None) -> "ScannerConfig":
         """Construye la config desde `settings.yaml` (sección `scanner`)."""

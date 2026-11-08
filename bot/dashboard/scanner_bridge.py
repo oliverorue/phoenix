@@ -63,6 +63,8 @@ class ScannerBridge:
         self._executor: Optional[LiveTradeExecutor] = None
         self._live_states: dict[str, object] = {}
         self._live_equity: float = self._config.paper_initial_capital
+        self._auto_trade = bool(self._config.auto_trade)
+        self._last_close_ts: dict[str, float] = {}
         if not self._dry_run:
             self._init_live()
         self._scanner = MarketScanner(self._config)
@@ -103,6 +105,8 @@ class ScannerBridge:
         tasks = [asyncio.create_task(self._scanner.run(), name="scanner")]
         if self._executor is not None:
             tasks.append(asyncio.create_task(self._live_loop(), name="live"))
+        if self._auto_trade:
+            tasks.append(asyncio.create_task(self._auto_trade_loop(), name="auto"))
         await asyncio.gather(*tasks)
 
     async def _live_loop(self) -> None:
@@ -175,6 +179,7 @@ class ScannerBridge:
     def _on_paper_close(self, trade: Trade) -> None:
         """Alimenta el Kelly con el PnL del trade y notifica el cierre."""
         self.risk.record_trade(trade.realized_pnl)
+        self._last_close_ts[trade.symbol] = time.time()
         self._notify_async(self._send_trade_close, trade)
 
     def equity(self) -> float:
@@ -228,12 +233,11 @@ class ScannerBridge:
             return self.open_paper_trade(signal)
         return self.open_live_trade(signal)
 
-    def open_live_trade(self, signal: Signal) -> Optional[Trade]:
-        """Abre un trade REAL en el exchange (requiere dry_run: false + keys)."""
+    async def _open_live_async(self, signal: Signal) -> Optional[Trade]:
+        """Crea el trade y coloca las órdenes reales (corre en el event loop)."""
         if signal.direction not in ("LONG", "SHORT"):
             return None
-        if self._executor is None or self._loop is None:
-            logger.warning("[live] ejecutor/loop no listos")
+        if self._executor is None:
             return None
         sizing = self.suggest_sizing(signal)
         if sizing.risk_usdt <= 0:
@@ -259,11 +263,8 @@ class ScannerBridge:
             tp1_ratio=plan.tp1_ratio,
             trailing_dist=plan.trailing_dist,
         )
-        future = asyncio.run_coroutine_threadsafe(
-            self._executor.open(trade), self._loop,
-        )
         try:
-            state = future.result(timeout=30)
+            state = await self._executor.open(trade)
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[live] open falló: {exc}")
             self.trades.close_with_pnl(
@@ -273,6 +274,67 @@ class ScannerBridge:
         self._live_states[trade.id] = state
         self._notify_async(self._send_trade_open, trade)
         return trade
+
+    def open_live_trade(self, signal: Signal) -> Optional[Trade]:
+        """Abre un trade REAL (llamado desde Streamlit, hilo de la UI)."""
+        if self._executor is None or self._loop is None:
+            logger.warning("[live] ejecutor/loop no listos")
+            return None
+        future = asyncio.run_coroutine_threadsafe(
+            self._open_live_async(signal), self._loop,
+        )
+        try:
+            return future.result(timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[live] open falló: {exc}")
+            return None
+
+    def auto_trade_enabled(self) -> bool:
+        return self._auto_trade
+
+    def set_auto_trade(self, enabled: bool) -> None:
+        self._auto_trade = bool(enabled)
+
+    async def _auto_trade_loop(self) -> None:
+        """Auto-entrada: abre el mejor trade cuando hay lugar, en bucle."""
+        while not self._stop_evt.is_set():
+            if self._auto_trade:
+                try:
+                    await self._auto_trade_tick()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[auto] tick: {exc}")
+            await asyncio.sleep(self._config.auto_trade_interval_seconds)
+
+    async def _auto_trade_tick(self) -> None:
+        open_trades = self.trades.open_trades()
+        if len(open_trades) >= self._config.max_open_trades:
+            return
+        ranked = self.top_signals(limit=10)
+        if not ranked:
+            return
+        now = time.time()
+        open_symbols = {t.symbol for t in open_trades}
+        chosen: Optional[Signal] = None
+        for ranked_signal in ranked:
+            sig = ranked_signal.signal
+            if sig.confidence < self._config.min_confidence:
+                continue
+            if now - sig.ts > self._config.auto_trade_max_signal_age_seconds:
+                continue
+            if sig.symbol in open_symbols:
+                continue
+            if now - self._last_close_ts.get(sig.symbol, 0.0) < (
+                self._config.auto_trade_symbol_cooldown_seconds
+            ):
+                continue
+            chosen = sig
+            break
+        if chosen is None:
+            return
+        if self._dry_run:
+            self.open_paper_trade(chosen)
+        else:
+            await self._open_live_async(chosen)
 
     def paper_open_trades(self) -> list[Trade]:
         return self.trades.open_trades()

@@ -55,6 +55,11 @@ scanner:
   sl_distance_pct: 0.015
   tp1_ratio: 0.6
   trailing_dist_pct: 0.0
+  auto_trade: true
+  max_open_trades: 1
+  auto_trade_interval_seconds: 5
+  auto_trade_max_signal_age_seconds: 60
+  auto_trade_symbol_cooldown_seconds: 300
 
 # ── Market data (funding / open interest) ────────────────
 market_data:
