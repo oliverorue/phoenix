@@ -107,9 +107,10 @@ class MarketScanner:
         tickers = await asyncio.to_thread(rest.futures_ticker)
         pairs: list[PairMeta] = []
         watch = {w.upper() for w in self._cfg.watchlist}
+        blacklist = {b.upper() for b in self._cfg.symbol_blacklist}
         for t in tickers:
             sym = t.get("symbol", "")
-            if sym not in perps:
+            if sym not in perps or sym in blacklist:
                 continue
             quote_vol = float(t.get("quoteVolume") or 0.0)
             if quote_vol < self._cfg.min_quote_volume_24h and sym not in watch:

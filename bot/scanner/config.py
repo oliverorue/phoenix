@@ -28,6 +28,7 @@ class ScannerConfig(BaseModel):
     max_symbols: int = 60                       # techo del universo rastreado
     symbols_per_shard: int = 50                 # streams por socket combinado
     watchlist: list[str] = Field(default_factory=list)  # siempre incluidos
+    symbol_blacklist: list[str] = Field(default_factory=list)  # excluidos del universo
 
     # ── Book / depth ────────────────────────────────────
     depth_levels: Literal[5, 10, 20] = 20
