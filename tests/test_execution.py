@@ -198,3 +198,26 @@ class TestTimeout:
         assert trade.status == TradeStatus.CLOSED
         assert trade.exit_reason == "TIMEOUT"
         assert mgr.open_trades() == []
+
+
+class TestFees:
+    def test_entry_and_exit_fees_applied(self):
+        mgr = TradeManager(fee_pct=0.0005)
+        trade = mgr.open_trade("X", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        # comisión de entrada = 10*100*0.0005 = 0.5
+        assert trade.realized_pnl == pytest.approx(-0.5)
+        mgr.close_manual(trade.id, 101.0, ts=1.0)
+        # bruto = (101-100)*10 = 10; salida = 10*101*0.0005 = 0.505
+        assert trade.realized_pnl == pytest.approx(-0.5 + 10.0 - 0.505)
+
+    def test_sl_applies_fees(self):
+        mgr = TradeManager(fee_pct=0.0005)
+        trade = mgr.open_trade("X", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        mgr.on_price("X", 98.0, ts=1.0)
+        # entrada -0.5; SL bruto -10; salida 10*99*0.0005 = 0.495
+        assert trade.realized_pnl == pytest.approx(-0.5 - 10.0 - 0.495)
+
+    def test_no_fees_when_zero(self):
+        mgr = TradeManager(fee_pct=0.0)
+        trade = mgr.open_trade("X", "LONG", 100.0, 99.0, 101.0, 102.0, 10.0, ts=0.0)
+        assert trade.realized_pnl == 0.0

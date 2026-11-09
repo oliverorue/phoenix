@@ -53,6 +53,7 @@ class ScannerBridge:
         self.trades = TradeManager(
             store=self.trade_store, on_close=self._on_paper_close,
             max_hold_seconds=self._config.max_hold_seconds,
+            fee_pct=(self._config.fee_pct if self._dry_run else 0.0),
         )
         self.trades.load(self.trade_store)
         self.risk.load_history(self.trade_store.load_pnl())

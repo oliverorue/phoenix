@@ -24,6 +24,7 @@ class TradeManager:
         store: Optional[object] = None,
         on_close: Optional[Callable[[Trade], None]] = None,
         max_hold_seconds: float = 0.0,
+        fee_pct: float = 0.0,
     ) -> None:
         self._lock = threading.Lock()
         self._open: dict[str, Trade] = {}
@@ -33,6 +34,7 @@ class TradeManager:
         self._store = store
         self._on_close = on_close
         self._max_hold_seconds = max_hold_seconds
+        self._fee_pct = fee_pct
         self._last_price: dict[str, float] = {}
 
     def open_trade(
@@ -70,6 +72,8 @@ class TradeManager:
             trade.fills.append(
                 Fill(trade.id, "ENTRY", qty, entry_price, trade.opened_at)
             )
+            if self._fee_pct > 0:
+                trade.realized_pnl -= trade.qty * entry_price * self._fee_pct
             self._open[trade.id] = trade
             self._by_symbol.setdefault(trade.symbol, []).append(trade.id)
             if self._store is not None:
@@ -92,7 +96,9 @@ class TradeManager:
                 trade = self._open.get(tid)
                 if trade is None:
                     continue
-                for action in advance(trade, price, now, self._max_hold_seconds):
+                for action in advance(
+                    trade, price, now, self._max_hold_seconds, self._fee_pct,
+                ):
                     if action.kind in ("PARTIAL_CLOSE", "FULL_CLOSE"):
                         fill = Fill(tid, action.reason, action.qty, action.price, now)
                         trade.fills.append(fill)
@@ -113,6 +119,8 @@ class TradeManager:
             sign = direction_sign(trade.direction)
             trade.realized_pnl += (
                 (price - trade.entry_price) * trade.remaining_qty * sign
+                - (trade.remaining_qty * price * self._fee_pct
+                   if self._fee_pct > 0 else 0.0)
             )
             trade.fills.append(
                 Fill(trade.id, "MANUAL", trade.remaining_qty, price, now)

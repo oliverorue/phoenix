@@ -40,7 +40,7 @@ scanner:
   funding_extreme: 0.0003
   liq_cascade_min_events: 3
   liq_cascade_min_notional: 2000000
-  min_confidence: 0.4
+  min_confidence: 0.55
   min_reasons: 2
   top_n: 3
   w_confidence: 0.5
@@ -52,9 +52,10 @@ scanner:
   paper_initial_capital: 15.0
   max_risk_pct: 0.10
   max_hold_seconds: 7200
-  sl_distance_pct: 0.015
+  sl_distance_pct: 0.025
   tp1_ratio: 0.6
   trailing_dist_pct: 0.0
+  fee_pct: 0.0005
   auto_trade: true
   max_open_trades: 1
   auto_trade_interval_seconds: 5

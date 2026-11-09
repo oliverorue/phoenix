@@ -68,6 +68,7 @@ class ScannerConfig(BaseModel):
     sl_distance_pct: float = 0.015  # distancia al SL (1R) como fracción del precio
     tp1_ratio: float = 0.6          # porción cerrada en TP1 (50-65%)
     trailing_dist_pct: float = 0.0  # 0 = sin trailing (salida en TP2)
+    fee_pct: float = 0.0005         # taker por lado (ida y vuelta = 2x), solo paper
 
     # ── Auto-entrada (opcional) ─────────────────────────
     auto_trade: bool = False                  # abre el top-1 automáticamente
