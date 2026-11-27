@@ -1,0 +1,7 @@
+[Unit]
+Description=Phoenix radar watchdog (heartbeat del motor)
+After=phoenix-radar-engine.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/phoenix/scripts/radar_watchdog.sh

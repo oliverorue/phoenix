@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
@@ -30,7 +31,8 @@ from bot.execution.security import enforce_live_config
 from bot.execution.sizing import plan_trade
 from bot.execution.store import TradeStore
 from bot.scanner.config import ScannerConfig
-from config.loader import API_KEY, API_SECRET, TESTNET
+from config.loader import API_KEY, API_SECRET, TESTNET, get_phase_config
+from bot import radar_state
 from bot.scanner.market_scanner import MarketScanner
 from bot.scanner.models import ScannerStats, Signal, Sizing
 from bot.scanner.ranker import RankedSignal, SignalRanker
@@ -44,9 +46,13 @@ class ScannerBridge:
         self,
         config: Optional[ScannerConfig] = None,
         base_risk_pct: float = 0.01,
+        view_mode: bool = False,
     ) -> None:
         self._config = config or ScannerConfig.from_settings()
         self._dry_run = self._config.dry_run
+        self._base_risk_pct = base_risk_pct
+        self._view_mode = view_mode
+        self._lock_fd: Optional[int] = None
         self.risk = RiskEngine(base_risk_pct=base_risk_pct)
         self.ranker = SignalRanker(self._config)
         self.trade_store = TradeStore()
@@ -66,6 +72,13 @@ class ScannerBridge:
         self._live_equity: float = self._config.paper_initial_capital
         self._auto_trade = bool(self._config.auto_trade)
         self._last_close_ts: dict[str, float] = {}
+        _, phase_cfg = get_phase_config(self._config.paper_initial_capital)
+        self._max_dd_daily = float(phase_cfg.get("max_dd_daily", 0.03))
+        self._max_stops_day = int(phase_cfg.get("max_stops_day", 2))
+        self._day_key = ""
+        self._day_start_equity = self._config.paper_initial_capital
+        self._day_halted = False
+        self._day_halt_reason = ""
         if not self._dry_run:
             self._init_live()
         self._scanner = MarketScanner(self._config)
@@ -84,15 +97,47 @@ class ScannerBridge:
         self._executor = LiveTradeExecutor(self._broker)
         logger.warning("[live] MODO LIVE activado (testnet={})", TESTNET)
 
-    def start(self) -> None:
-        """Arranca el scanner en un hilo daemon (idempotente)."""
+    def start(self) -> bool:
+        """Arranca el scanner en un hilo daemon (idempotente).
+
+        Solo un proceso puede operar: el primero en tomar ``radar.lock``. Si el
+        lock ya está tomado (motor headless u otro dashboard), este bridge queda
+        en modo vista y no inicia scanner ni trading.
+        """
+        if self.is_view_mode():
+            return False
         if self._thread is not None and self._thread.is_alive():
-            return
+            return True
+        fd = radar_state.try_acquire_lock()
+        if fd is None:
+            logger.warning(
+                "[motor] lock tomado por otro proceso; dashboard en modo vista"
+            )
+            self._view_mode = True
+            return False
+        self._lock_fd = fd
         self._thread = threading.Thread(
             target=self._run, daemon=True, name="market-scanner",
         )
         self._thread.start()
         self._notify_async(self._send_start)
+        return True
+
+    def is_view_mode(self) -> bool:
+        return getattr(self, "_view_mode", False)
+
+    def refresh(self) -> None:
+        """Recarga trades/historial desde SQLite (solo modo vista)."""
+        if not self.is_view_mode():
+            return
+        self.trades = TradeManager(
+            store=self.trade_store,
+            max_hold_seconds=self._config.max_hold_seconds,
+            fee_pct=(self._config.fee_pct if self._dry_run else 0.0),
+        )
+        self.trades.load(self.trade_store)
+        self.risk = RiskEngine(base_risk_pct=self._base_risk_pct)
+        self.risk.load_history(self.trade_store.load_pnl())
 
     def _run(self) -> None:
         try:
@@ -137,15 +182,31 @@ class ScannerBridge:
     def stop(self) -> None:
         self._stop_evt.set()
         self._scanner.stop()
+        radar_state.release_lock(self._lock_fd)
+        self._lock_fd = None
 
     def is_running(self) -> bool:
+        if self.is_view_mode():
+            return radar_state.engine_alive()
         return self._thread is not None and self._thread.is_alive()
 
     def is_dry_run(self) -> bool:
         return self._dry_run
 
+    def _state(self) -> dict:
+        return radar_state.read_state() or {}
+
     def snapshot(self) -> tuple[list[Signal], ScannerStats, list[str]]:
         """(señales recientes, stats, símbolos rastreados) thread-safe."""
+        if self.is_view_mode():
+            state = self._state()
+            signals = [
+                Signal.model_validate(item["signal"])
+                for item in state.get("signals", [])
+                if isinstance(item, dict) and "signal" in item
+            ]
+            stats = ScannerStats.model_validate(state.get("scanner_stats") or {})
+            return signals, stats, list(state.get("tracked") or [])
         return (
             self._scanner.signals_snapshot(),
             self._scanner.stats(),
@@ -158,6 +219,19 @@ class ScannerBridge:
         limit: Optional[int] = None,
     ) -> list[RankedSignal]:
         """Señales rankeadas (mejores primero), recortadas a ``limit``."""
+        limit = limit if limit is not None else self._config.top_n
+        if self.is_view_mode():
+            ranked: list[RankedSignal] = []
+            for item in self._state().get("signals", []):
+                try:
+                    ranked.append(RankedSignal(
+                        signal=Signal.model_validate(item["signal"]),
+                        score=float(item.get("score", 0.0)),
+                        breakdown=dict(item.get("breakdown") or {}),
+                    ))
+                except (KeyError, TypeError, ValueError):
+                    continue
+            return ranked[:limit]
         now = now if now is not None else time.time()
         ranked = self.ranker.rank(
             self._scanner.signals_snapshot(),
@@ -174,7 +248,6 @@ class ScannerBridge:
                 continue
             seen.add(symbol)
             unique.append(ranked_signal)
-        limit = limit if limit is not None else self._config.top_n
         return unique[:limit]
 
     def _on_paper_close(self, trade: Trade) -> None:
@@ -197,9 +270,72 @@ class ScannerBridge:
             max_risk_pct=self._config.max_risk_pct,
         )
 
+    def _has_capacity(self) -> bool:
+        return len(self.trades.open_trades()) < self._config.max_open_trades
+
+    def _roll_day(self) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self._day_key:
+            self._day_key = today
+            self._day_start_equity = self.equity()
+            self._day_halted = False
+            self._day_halt_reason = ""
+
+    def _daily_risk_ok(self) -> bool:
+        """Stop intradía: drawdown diario y máximo de stops por día."""
+        self._roll_day()
+        if self._day_halted:
+            return False
+        if self._day_start_equity <= 0:
+            return True
+        day_pnl = self.equity() - self._day_start_equity
+        if day_pnl <= -self._max_dd_daily * self._day_start_equity:
+            pct = day_pnl / self._day_start_equity * 100
+            self._halt_day(
+                f"drawdown diario {pct:.2f}% <= -{self._max_dd_daily * 100:.0f}%"
+            )
+            return False
+        today = datetime.now(timezone.utc).date()
+        stops = sum(
+            1 for t in self.trades.closed_trades()
+            if t.exit_reason == "SL" and t.closed_at
+            and datetime.fromtimestamp(t.closed_at, timezone.utc).date() == today
+        )
+        if stops >= self._max_stops_day:
+            self._halt_day(f"{stops} stops hoy >= {self._max_stops_day}")
+            return False
+        return True
+
+    def _halt_day(self, reason: str) -> None:
+        if self._day_halted:
+            return
+        self._day_halted = True
+        self._day_halt_reason = reason
+        logger.warning(f"[riesgo] trading detenido hasta fin de día UTC: {reason}")
+        self._notify_async(self._send_day_halt, reason)
+
+    def _send_day_halt(self, reason: str) -> None:
+        self.notifier.send(
+            "⛔ STOP DIARIO",
+            f"Sin nuevas entradas hasta 00:00 UTC\n{reason}",
+            "CRITICAL", "risk", force=True,
+        )
+
     def open_paper_trade(self, signal: Signal) -> Optional[Trade]:
         """Abre un trade dry-run con capital y riesgo automáticos (Kelly)."""
         if signal.direction not in ("LONG", "SHORT"):
+            return None
+        if not self._daily_risk_ok():
+            logger.warning(
+                f"[paper] entrada rechazada en {signal.symbol}: "
+                f"stop diario activo ({self._day_halt_reason})"
+            )
+            return None
+        if not self._has_capacity():
+            logger.warning(
+                f"[paper] entrada rechazada en {signal.symbol}: "
+                f"max_open_trades={self._config.max_open_trades} alcanzado"
+            )
             return None
         sizing = self.suggest_sizing(signal)
         if sizing.risk_usdt <= 0:
@@ -230,6 +366,11 @@ class ScannerBridge:
 
     def execute(self, signal: Signal) -> Optional[Trade]:
         """Abre un trade según el modo: paper (dry-run) o live."""
+        if self.is_view_mode():
+            radar_state.enqueue_command(
+                {"cmd": "open", "signal": signal.model_dump()},
+            )
+            return None
         if self._dry_run:
             return self.open_paper_trade(signal)
         return self.open_live_trade(signal)
@@ -237,6 +378,18 @@ class ScannerBridge:
     async def _open_live_async(self, signal: Signal) -> Optional[Trade]:
         """Crea el trade y coloca las órdenes reales (corre en el event loop)."""
         if signal.direction not in ("LONG", "SHORT"):
+            return None
+        if not self._daily_risk_ok():
+            logger.warning(
+                f"[live] entrada rechazada en {signal.symbol}: "
+                f"stop diario activo ({self._day_halt_reason})"
+            )
+            return None
+        if not self._has_capacity():
+            logger.warning(
+                f"[live] entrada rechazada en {signal.symbol}: "
+                f"max_open_trades={self._config.max_open_trades} alcanzado"
+            )
             return None
         if self._executor is None:
             return None
@@ -291,10 +444,16 @@ class ScannerBridge:
             return None
 
     def auto_trade_enabled(self) -> bool:
+        if self.is_view_mode():
+            state = self._state()
+            if state.get("ts"):
+                return bool(state.get("auto_trade"))
         return self._auto_trade
 
     def set_auto_trade(self, enabled: bool) -> None:
         self._auto_trade = bool(enabled)
+        if self.is_view_mode():
+            radar_state.enqueue_command({"cmd": "auto_on" if enabled else "auto_off"})
 
     async def _auto_trade_loop(self) -> None:
         """Auto-entrada: abre el mejor trade cuando hay lugar, en bucle."""
@@ -307,6 +466,8 @@ class ScannerBridge:
             await asyncio.sleep(self._config.auto_trade_interval_seconds)
 
     async def _auto_trade_tick(self) -> None:
+        if not self._daily_risk_ok():
+            return
         open_trades = self.trades.open_trades()
         if len(open_trades) >= self._config.max_open_trades:
             return
@@ -348,8 +509,17 @@ class ScannerBridge:
 
     def paper_open_positions(self) -> list[tuple[Trade, float, float]]:
         """(trade, unrealized_pnl, current_price) de los trades abiertos."""
+        if self.is_view_mode():
+            prices = dict(self._state().get("last_prices") or {})
+            result: list[tuple[Trade, float, float]] = []
+            for trade in self.trades.open_trades():
+                price = float(prices.get(trade.symbol, trade.entry_price))
+                sign = 1.0 if trade.direction == Direction.LONG else -1.0
+                upnl = (price - trade.entry_price) * trade.remaining_qty * sign
+                result.append((trade, upnl, price))
+            return result
         prices = self.trades.last_prices()
-        result: list[tuple[Trade, float, float]] = []
+        result = []
         for trade in self.trades.open_trades():
             price = prices.get(trade.symbol, trade.entry_price)
             result.append((trade, self.trades.unrealized_pnl(trade), price))
@@ -357,6 +527,9 @@ class ScannerBridge:
 
     def kill_switch(self) -> int:
         """Cierra todos los trades. En live aplana posiciones reales."""
+        if self.is_view_mode():
+            radar_state.enqueue_command({"cmd": "kill"})
+            return -1
         if not self._dry_run:
             return self._kill_switch_live()
         prices = self.trades.last_prices()
@@ -430,7 +603,19 @@ class ScannerBridge:
 
     def notify_status(self) -> None:
         """Envía un estado del paper a Telegram/Discord (no bloqueante)."""
+        if self.is_view_mode():
+            radar_state.enqueue_command({"cmd": "notify"})
+            return
         self._notify_async(self._send_status)
+
+    def day_halted(self) -> bool:
+        return self._day_halted
+
+    def day_halt_reason(self) -> str:
+        return self._day_halt_reason
+
+    def last_prices_snapshot(self) -> dict[str, float]:
+        return self.trades.last_prices()
 
     def progress_line(self) -> str:
         """Línea de progreso hacia la siguiente etapa (gates)."""
