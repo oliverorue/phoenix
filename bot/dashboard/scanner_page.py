@@ -107,8 +107,11 @@ def _render_signals(st_module: Any, bridge: ScannerBridge,
             f"🛒 Operar {r.signal.symbol} {r.signal.direction} ({mode})",
             key=f"operar_{r.signal.symbol}_{i}",
         ):
+            view_mode = getattr(bridge, "is_view_mode", lambda: False)()
             trade = bridge.execute(r.signal)
-            if trade is not None:
+            if view_mode:
+                st_module.toast("📨 Comando enviado al motor headless")
+            elif trade is not None:
                 st_module.toast(
                     f"✅ Trade {trade.id} abierto: {trade.symbol} "
                     f"{trade.direction.value} @ {trade.entry_price}"
@@ -276,7 +279,14 @@ def render_scanner_page(st_module: Any = st) -> None:
         return
 
     bridge = _get_bridge()
+    bridge.refresh()
     _signals, stats, _tracked = bridge.snapshot()
+
+    if getattr(bridge, "is_view_mode", lambda: False)():
+        st_module.info(
+            "🛰️ Motor headless activo: esta vista es de solo lectura y los "
+            "comandos se envían al servicio `phoenix-radar-engine`."
+        )
 
     # ── KPIs arriba ─────────────────────────────────────
     s = bridge.paper_stats()
@@ -305,8 +315,12 @@ def render_scanner_page(st_module: Any = st) -> None:
     with c_kill:
         st_module.write("")
         if st_module.button("🛑 Cerrar TODO", use_container_width=True):
+            view_mode = getattr(bridge, "is_view_mode", lambda: False)()
             n = bridge.kill_switch()
-            st_module.toast(f"✅ {n} trade(s) cerrado(s)")
+            if view_mode:
+                st_module.toast("🛑 Comando de cierre enviado al motor")
+            else:
+                st_module.toast(f"✅ {n} trade(s) cerrado(s)")
             st_module.rerun()
 
     mode = "PAPER" if bridge.is_dry_run() else "LIVE"

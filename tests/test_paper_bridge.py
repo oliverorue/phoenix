@@ -25,6 +25,12 @@ def make_bridge() -> ScannerBridge:
     bridge._executor = None
     bridge._loop = None
     bridge._live_states = {}
+    bridge._max_dd_daily = 0.03
+    bridge._max_stops_day = 2
+    bridge._day_key = ""
+    bridge._day_start_equity = bridge._config.paper_initial_capital
+    bridge._day_halted = False
+    bridge._day_halt_reason = ""
     bridge.risk = RiskEngine(base_risk_pct=0.01)
     bridge.trades = TradeManager()
     return bridge
@@ -61,10 +67,53 @@ class TestOpenPaperTrade:
         signal = Signal(symbol="XRPUSDT", direction="NEUTRAL", confidence=0.7, price=1.0)
         assert bridge.open_paper_trade(signal) is None
 
+    def test_rejects_extra_trade_when_max_open_reached(self):
+        bridge = make_bridge()
+        s1 = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
+        s2 = Signal(symbol="SOLUSDT", direction="LONG", confidence=0.7, price=100.0)
+
+        assert bridge.open_paper_trade(s1) is not None
+        assert bridge.open_paper_trade(s2) is None
+        assert len(bridge.paper_open_trades()) == 1
+
+
+class TestDailyRiskStop:
+    def test_blocks_new_trade_after_daily_drawdown(self):
+        bridge = make_bridge()
+        sig = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
+        trade = bridge.open_paper_trade(sig)
+        bridge.trades.close_manual(trade.id, 0.99)
+
+        assert bridge._daily_risk_ok() is False
+        assert bridge.open_paper_trade(
+            Signal(symbol="SOLUSDT", direction="LONG", confidence=0.7, price=100.0)
+        ) is None
+        assert bridge.paper_open_trades() == []
+
+    def test_blocks_new_trade_after_max_stops_today(self):
+        bridge = make_bridge()
+        bridge._max_stops_day = 1
+        sig = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
+        trade = bridge.open_paper_trade(sig)
+        bridge.trades.close_with_pnl(trade.id, -0.1, 0.99, "SL")
+
+        assert bridge._daily_risk_ok() is False
+        assert bridge.open_paper_trade(sig) is None
+
+    def test_halt_resets_on_new_utc_day(self):
+        bridge = make_bridge()
+        bridge._day_key = "2000-01-01"
+        bridge._day_halted = True
+        bridge._day_halt_reason = "viejo"
+
+        assert bridge._daily_risk_ok() is True
+        assert bridge._day_halted is False
+
 
 class TestKillSwitch:
     def test_closes_all_open_trades(self):
         bridge = make_bridge()
+        bridge._config.max_open_trades = 2
         s1 = Signal(symbol="XRPUSDT", direction="LONG", confidence=0.7, price=1.0)
         s2 = Signal(symbol="SOLUSDT", direction="SHORT", confidence=0.7, price=100.0)
         bridge.open_paper_trade(s1)

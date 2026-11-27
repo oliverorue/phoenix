@@ -73,7 +73,7 @@ Estas señales son **scalps**: entrás y salís en **minutos a 2 horas**.
 
 - **Máx 1–2% del capital por trade.**
 - **Máx 3 trades abiertos a la vez.**
-- **Stop diario**: si perdés **5% del capital en un día, pará.**
+- **Stop diario**: automático en el modo radar — se bloquean nuevas entradas al tocar el `max_dd_daily` de la fase (3% en Fase 0) o el `max_stops_day` (2 stops). En la ruta manual, pará a −5%.
 - **Sin excepciones** por "estoy seguro" o "voy a recuperar".
 - Si dudás, no entres.
 

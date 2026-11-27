@@ -1,0 +1,17 @@
+[Unit]
+Description=Phoenix radar motor headless (scanner + paper/live)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/phoenix
+ExecStart=/opt/phoenix/venv/bin/python3 -m bot.radar_runner
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

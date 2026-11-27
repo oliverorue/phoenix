@@ -21,25 +21,37 @@ Instalado y funcionando por primera vez el 2026-11-08.
 El dashboard escucha solo en localhost del VPS. Desde tu notebook:
 
 ```bash
+phx
+```
+
+Abre el túnel SSH y el navegador en un solo paso (Ctrl+C cierra el túnel).
+El comando es un symlink a `scripts/phoenix_dashboard.sh`; el equivalente
+manual sigue siendo:
+
+```bash
 ssh -L 8502:127.0.0.1:8502 root@216.238.124.144
 ```
 
-Dejá esa terminal abierta y entrá a **http://localhost:8502**.
+y entrar a **http://localhost:8502**.
 
-## Importante: cuándo arranca el radar
+## Arquitectura: motor headless + dashboard
 
-- Streamlit **no** ejecuta el radar hasta que alguien abre el dashboard (una sesión).
-- Una vez abierto, el scanner **sigue corriendo aunque cierres la pestaña**, hasta
-  que se reinicie el proceso/VPS.
-- **Después de reiniciar el VPS, abrí el dashboard una vez** para reanudar el radar.
-  (Para LIVE conviene un runner headless sin Streamlit; pendiente.)
+- **`phoenix-radar-engine.service`** corre `python -m bot.radar_runner`: scanner,
+  paper/live y auto-entrada **sin Streamlit**, 24/7. Es el único que opera
+  (toma el lock `data/radar.lock`).
+- **`phoenix-radar.service`** corre Streamlit en `127.0.0.1:8502`. Si el motor
+  está activo, el dashboard entra en **modo vista**: lee `data/radar_state.json`
+  y envía comandos por `data/radar_cmds/` (abrir, kill switch, auto on/off).
+- Ya no hace falta abrir el dashboard después de reiniciar el VPS: el motor
+  arranca solo y sigue operando.
 
 ## Comandos útiles (en el VPS)
 
 ```bash
-systemctl status phoenix-radar      # estado
-systemctl restart phoenix-radar     # reiniciar
-journalctl -u phoenix-radar -f      # logs en vivo
+systemctl status phoenix-radar-engine   # motor (scanner + trades)
+systemctl status phoenix-radar          # dashboard
+systemctl restart phoenix-radar-engine  # reiniciar el motor
+journalctl -u phoenix-radar-engine -f   # logs del motor en vivo
 ```
 
 ## Actualizar código
@@ -47,7 +59,7 @@ journalctl -u phoenix-radar -f      # logs en vivo
 ```bash
 cd /opt/phoenix && git pull \
   && ./venv/bin/pip install -r requirements.txt \
-  && systemctl restart phoenix-radar
+  && systemctl restart phoenix-radar-engine phoenix-radar
 ```
 
 ## Backup del historial (desde tu notebook)
